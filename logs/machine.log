@@ -1,0 +1,47 @@
+2025-11-25 17:26:32,757 WARNING machine: pyserial not found, forcing MOCK mode
+2025-11-25 17:26:34,757 INFO machine: MachineCommand SEND: dep1
+2025-11-25 17:26:34,758 INFO machine: [MOCK] Sending command: dep1
+2025-11-25 17:26:35,258 INFO machine: MachineCommand RECV (mock): dep1 -> device power on
+2025-11-25 17:26:37,259 INFO machine: MachineCommand SEND: homing
+2025-11-25 17:26:37,259 INFO machine: [MOCK] Sending command: homing
+2025-11-25 17:26:37,759 INFO machine: MachineCommand RECV (mock): homing -> ack
+2025-11-25 17:41:37,765 INFO machine: Machine idle timeout, entering sleep mode (dep0)
+2025-11-25 17:41:37,765 INFO machine: MachineCommand SEND: dep0
+2025-11-25 17:41:37,765 INFO machine: [MOCK] Sending command: dep0
+2025-11-25 17:41:38,266 INFO machine: MachineCommand RECV (mock): dep0 -> device power of
+2025-11-25 18:17:04,382 WARNING machine: pyserial not found, forcing MOCK mode
+2025-11-25 18:17:06,383 INFO machine: MachineCommand SEND: dep1
+2025-11-25 18:17:06,383 INFO machine: [MOCK] Sending command: dep1
+2025-11-25 18:17:06,884 INFO machine: MachineCommand RECV (mock): dep1 -> device power on
+2025-11-25 18:17:08,884 INFO machine: MachineCommand SEND: homing
+2025-11-25 18:17:08,885 INFO machine: [MOCK] Sending command: homing
+2025-11-25 18:17:09,385 INFO machine: MachineCommand RECV (mock): homing -> ack
+2025-11-25 18:17:09,631 WARNING machine: pyserial not found, forcing MOCK mode
+2025-11-25 18:17:11,632 INFO machine: MachineCommand SEND: dep1
+2025-11-25 18:17:11,632 INFO machine: [MOCK] Sending command: dep1
+2025-11-25 18:17:12,132 INFO machine: MachineCommand RECV (mock): dep1 -> device power on
+2025-11-25 18:17:14,133 INFO machine: MachineCommand SEND: homing
+2025-11-25 18:17:14,133 INFO machine: [MOCK] Sending command: homing
+2025-11-25 18:17:14,633 INFO machine: MachineCommand RECV (mock): homing -> ack
+2025-11-25 18:32:09,391 INFO machine: Machine idle timeout, entering sleep mode (dep0)
+2025-11-25 18:32:09,391 INFO machine: MachineCommand SEND: dep0
+2025-11-25 18:32:09,391 INFO machine: [MOCK] Sending command: dep0
+2025-11-25 18:32:09,892 INFO machine: MachineCommand RECV (mock): dep0 -> device power of
+2025-11-25 18:32:14,640 INFO machine: Machine idle timeout, entering sleep mode (dep0)
+2025-11-25 18:32:14,640 INFO machine: MachineCommand SEND: dep0
+2025-11-25 18:32:14,640 INFO machine: [MOCK] Sending command: dep0
+2025-11-25 18:32:15,140 INFO machine: MachineCommand RECV (mock): dep0 -> device power of
+2025-11-25 22:42:24,244 INFO machine: MachineCommand SEND: open
+2025-11-25 22:42:24,244 INFO machine: [MOCK] Sending command: open
+2025-11-25 22:42:24,744 INFO machine: MachineCommand RECV (mock): open -> opened
+2025-11-25 22:45:42,206 WARNING machine: pyserial not found, forcing MOCK mode
+2025-11-25 22:45:44,207 INFO machine: MachineCommand SEND: dep1
+2025-11-25 22:45:44,207 INFO machine: [MOCK] Sending command: dep1
+2025-11-25 22:45:44,707 INFO machine: MachineCommand RECV (mock): dep1 -> device power on
+2025-11-25 22:45:46,708 INFO machine: MachineCommand SEND: homing
+2025-11-25 22:45:46,708 INFO machine: [MOCK] Sending command: homing
+2025-11-25 22:45:47,209 INFO machine: MachineCommand RECV (mock): homing -> ack
+2025-11-25 23:00:47,215 INFO machine: Machine idle timeout, entering sleep mode (dep0)
+2025-11-25 23:00:47,215 INFO machine: MachineCommand SEND: dep0
+2025-11-25 23:00:47,215 INFO machine: [MOCK] Sending command: dep0
+2025-11-25 23:00:47,715 INFO machine: MachineCommand RECV (mock): dep0 -> device power of

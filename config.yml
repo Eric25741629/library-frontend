@@ -1,0 +1,12 @@
+admin_password: "admin"
+barcode_login_enabled: true
+require_admin_login: false
+max_return_limit: 20
+
+machine:
+  port: "/dev/ttyUSB0"
+  baudrate: 38400
+  mock_mode: true
+
+logs:
+  backup_days: 30

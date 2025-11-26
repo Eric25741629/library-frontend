@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>國立雲林科技大學圖書館 - 自助還書系統</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <!-- 引入 Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body>
+    <!-- Service Suspended Overlay -->
+    <div id="suspended-overlay" class="suspended-overlay" style="display: {% if service_suspended %}flex{% else %}none{% endif %};">
+        <div class="suspended-content">
+            <i class="fas fa-exclamation-circle"></i>
+            <h2>服務暫停</h2>
+            <p>還書箱已滿，請通知圖書館人員進行處理。</p>
+            <p class="sub-info">System Suspended: Return Box Full</p>
+        </div>
+    </div>
+
+    <!-- Loading Overlay (used when sending hardware control commands) -->
+    <div id="loading-overlay" class="suspended-overlay" style="display:none; align-items:center; justify-content:center;">
+        <div class="suspended-content">
+            <i class="fas fa-spinner fa-pulse" style="font-size:2rem;"></i>
+            <h2>加載中，請稍等</h2>
+            <p id="loading-message" style="margin-top:0.5rem;"></p>
+        </div>
+    </div>
+
+    <!-- Header -->
+    <header class="main-header">
+        <div class="header-left">
+            <span class="time" id="current-time">18:43 | 2025年5月24日</span>
+        </div>
+        <div class="header-center">
+            <h1>國立雲林科技大學圖書館</h1>
+        </div>
+        <div class="header-right">
+            <div class="logo-placeholder">
+                <i class="fas fa-university"></i> YunTech 國立雲林科技大學
+                <span class="sub-text">National Yunlin University of Science & Technology</span>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content Area -->
+    <main class="main-container">
+        
+        <!-- Step 1: Welcome Screen -->
+        <section id="step-welcome" class="step-section active">
+            <div class="welcome-content">
+                <h2 class="welcome-title">智慧還書，流暢體驗</h2>
+                <p class="welcome-subtitle">歡迎使用國立雲林科技大學圖書館自助還書服務</p>
+                <button class="btn-primary btn-large" onclick="nextStep('step-scan')">開始還書</button>
+            </div>
+        </section>
+
+        <!-- Step 2: Scan Screen -->
+        <section id="step-scan" class="step-section">
+            <h2 class="section-title">請將書本條碼放入掃描區</h2>
+            
+            <div class="scan-area-container">
+                <div class="scan-box">
+                    <i class="fas fa-barcode" style="font-size: 8rem; color: #e9ecef;"></i>
+                </div>
+            </div>
+            
+            <p class="scan-status" id="scan-status-text">系統就緒，請掃描書籍條碼</p>
+
+            <!-- 真實掃描輸入框 -->
+            <input type="text" id="barcode-input" class="barcode-input-field" placeholder="游標請停留在這並掃描..." autocomplete="off" autofocus>
+
+            <div class="action-buttons">
+                <button class="btn-danger btn-medium" onclick="resetFlow()">
+                    <i class="fas fa-times"></i> 取消還書
+                </button>
+            </div>
+        </section>
+
+        <!-- Step 3: Confirmation Screen -->
+        <section id="step-confirm" class="step-section">
+            <h2 class="section-title">請確認以下還書資訊：</h2>
+            
+            <div class="book-list-container">
+                <ul id="scanned-books-list" class="book-list">
+                    <!-- JS will populate this -->
+                </ul>
+            </div>
+
+            <div class="action-buttons-vertical">
+                <button class="btn-primary btn-block" onclick="goToPlaceBookStep()">
+                    <i class="fas fa-arrow-right"></i> 下一步：投入還書箱
+                </button>
+            </div>
+        </section>
+
+        <!-- Step 3.5: Place Book Instruction -->
+        <section id="step-place-book" class="step-section">
+            <h2 class="section-title">請將書本放入還書機內</h2>
+            
+            <div class="place-book-instruction">
+                <div class="place-book-anim-container">
+                    <div class="anim-book">
+                        <i class="fas fa-book"></i>
+                    </div>
+                    <div class="anim-arrow">
+                        <i class="fas fa-arrow-down"></i>
+                    </div>
+                    <div class="anim-box">
+                        <i class="fas fa-box-open"></i>
+                    </div>
+                </div>
+                <p style="font-size: 1.5rem; color: #555; margin-bottom: 3rem;">請確認所有書籍皆已放入還書口</p>
+            </div>
+
+            <div class="action-buttons">
+                <button class="btn-primary btn-large btn-pulse" onclick="finalizeReturn()">
+                    <i class="fas fa-check"></i> 完成投入
+                </button>
+            </div>
+        </section>
+
+        <!-- Step 4: Success Screen -->
+        <section id="step-success" class="step-section">
+            <div class="success-card">
+                <div class="success-icon">
+                    <i class="fas fa-check"></i>
+                </div>
+                <h2 class="success-title">還書成功！</h2>
+                <p class="success-subtitle">感謝您的使用。</p>
+                
+                <p style="color: #888; margin-bottom: 1.5rem;">將在 <span id="countdown-sec" style="color: var(--primary-blue); font-weight: bold;">5</span> 秒後自動返回首頁</p>
+
+                <button class="btn-primary btn-medium" onclick="resetFlow()">
+                    <i class="fas fa-home"></i> 返回首頁
+                </button>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- Footer -->
+    <footer class="main-footer">
+        <div class="footer-left">
+            &copy; 2025 國立雲林科技大學圖書館 | 版權所有
+        </div>
+        <div class="footer-right">
+            <a href="/admin" style="color: #999; text-decoration: none; margin-right: 15px; font-size: 0.8rem;"><i class="fas fa-cog"></i> 管理後台</a>
+            <span class="system-status" id="system-status">
+                <span id="lib-status" style="margin-right:12px;">
+                    <span class="status-dot" id="lib-dot" style="background-color:#ffcc00"></span>
+                    圖書館: <span id="lib-text">檢查中</span>
+                </span>
+                <span id="machine-status">
+                    <span class="status-dot" id="machine-dot" style="background-color:#ffcc00"></span>
+                    機器: <span id="machine-text">檢查中</span>
+                </span>
+            </span>
+        </div>
+    </footer>
+
+    <script>
+        let scannedBooks = [];
+        
+        // 更新時間
+        function updateTime() {
+            const now = new Date();
+            const dateStr = now.toLocaleDateString('zh-TW', { year: 'numeric', month: 'long', day: 'numeric' });
+            const timeStr = now.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' });
+            document.getElementById('current-time').textContent = `${timeStr} | ${dateStr}`;
+        }
+        setInterval(updateTime, 1000);
+        updateTime();
+
+        // 流程控制
+        function nextStep(stepId) {
+            // Hide all sections
+            document.querySelectorAll('.step-section').forEach(el => el.classList.remove('active'));
+            // Show target section
+            const target = document.getElementById(stepId);
+            target.classList.add('active');
+    
+            // Special logic for scan step
+            if (stepId === 'step-scan') {
+                const input = document.getElementById('barcode-input');
+                input.value = '';
+                input.focus();
+            }
+        }
+
+        // 顯示 / 隱藏 Loading Overlay（用於硬體控制命令）
+        function showLoading(message) {
+            const overlay = document.getElementById('loading-overlay');
+            const msg = document.getElementById('loading-message');
+            if (msg) msg.textContent = message || '';
+            if (overlay) overlay.style.display = 'flex';
+        }
+
+        function hideLoading() {
+            const overlay = document.getElementById('loading-overlay');
+            if (overlay) overlay.style.display = 'none';
+        }
+
+        let autoRedirectTimer;
+        let countdownInterval;
+
+        function resetFlow() {
+            clearTimeout(autoRedirectTimer);
+            clearInterval(countdownInterval);
+
+            scannedBooks = [];
+            updateBookList();
+            nextStep('step-welcome');
+        }
+
+        // 處理掃描邏輯
+        async function handleScan(bookId) {
+            if (!bookId) return;
+            
+            const statusText = document.getElementById('scan-status-text');
+
+            // 檢查是否重複掃描
+            if (scannedBooks.some(b => b.book_id === bookId)) {
+                statusText.textContent = '此書籍已在清單中';
+                statusText.style.color = 'orange';
+                setTimeout(() => {
+                    statusText.textContent = '系統就緒，請掃描書籍條碼';
+                    statusText.style.color = '#666';
+                }, 2000);
+                return;
+            }
+
+            statusText.textContent = '查詢書籍資料中...';
+            statusText.style.color = '#007bff';
+
+            try {
+                const response = await fetch('/api/scan', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ book_id: bookId })
+                });
+                const result = await response.json();
+
+                if (result.success) {
+                    scannedBooks.push(result.data);
+                    updateBookList();
+                    nextStep('step-confirm');
+                } else {
+                    // 處理逾期錯誤
+                    if (result.code === 'OVERDUE') {
+                        // 顯示逾期警告並在 5 秒後跳回首頁
+                        const bookData = result.data || {};
+                        statusText.innerHTML = `
+                            <div style="color: #dc3545; font-weight: bold;">
+                                <i class="fas fa-exclamation-triangle"></i> 禁止還書：書籍已逾期<br>
+                                書名：${bookData.title || ''}<br>
+                                到期日：${bookData.due_date || ''}<br>
+                                借閱者：${bookData.patron_name || ''}<br>
+                                請至人工櫃台歸還
+                            </div>
+                        `;
+                        
+                        setTimeout(() => {
+                            resetFlow(); // 5秒後跳回首頁
+                        }, 5000);
+                        return;
+                    }
+
+                    statusText.textContent = result.message || '掃描失敗';
+                    statusText.style.color = 'red';
+                    // 3秒後重置狀態
+                    setTimeout(() => {
+                        statusText.textContent = '系統就緒，請掃描書籍條碼';
+                        statusText.style.color = '#666';
+                    }, 3000);
+                }
+            } catch (e) {
+                console.error(e);
+                statusText.textContent = '系統錯誤，請稍後再試';
+                statusText.style.color = 'red';
+            }
+        }
+
+        // 監聽真實掃描槍輸入 (或鍵盤)
+        const barcodeInput = document.getElementById('barcode-input');
+        barcodeInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                handleScan(this.value.trim());
+                this.value = '';
+            }
+        });
+
+        // 保持焦點在隱藏輸入框 (當在掃描頁面時)
+        document.addEventListener('click', function() {
+            if (document.getElementById('step-scan').classList.contains('active')) {
+                document.getElementById('barcode-input').focus();
+            }
+        });
+
+        // 更新確認頁面的列表
+        function updateBookList() {
+            const list = document.getElementById('scanned-books-list');
+            list.innerHTML = '';
+            
+            scannedBooks.forEach((book, index) => {
+                const li = document.createElement('li');
+                li.className = 'book-item';
+                li.innerHTML = `
+                    <span class="book-index">${index + 1}.</span>
+                    <span class="book-name">${book.title}</span>
+                    <span class="book-author">${book.author}</span>
+                `;
+                list.appendChild(li);
+            });
+        }
+
+        // 前往投入書籍步驟（會呼叫硬體開門，顯示等待畫面直到完成）
+        async function goToPlaceBookStep() {
+            if (scannedBooks.length === 0) return;
+            showLoading('正在開啟投書口，請稍候…');
+
+            try {
+                const res = await fetch('/api/hardware/open', { method: 'POST' });
+                const result = await res.json();
+                if (res.ok && result.success) {
+                    hideLoading();
+                    nextStep('step-place-book');
+                } else {
+                    hideLoading();
+                    alert(result.message || '開啟投書口失敗');
+                }
+            } catch (e) {
+                hideLoading();
+                console.error(e);
+                alert('系統錯誤，請稍後再試');
+            }
+        }
+
+        function startAutoRedirect() {
+            let seconds = 5;
+            const el = document.getElementById('countdown-sec');
+            if (el) el.textContent = seconds;
+
+            countdownInterval = setInterval(() => {
+                seconds--;
+                if (el) el.textContent = seconds;
+                if (seconds <= 0) clearInterval(countdownInterval);
+            }, 1000);
+
+            autoRedirectTimer = setTimeout(() => {
+                resetFlow();
+            }, 5000);
+        }
+
+        // 確認還書 (最終步驟)
+        async function finalizeReturn() {
+            if (scannedBooks.length === 0) return;
+    
+            const bookIds = scannedBooks.map(b => b.book_id);
+            showLoading('正在處理還書，請稍候…');
+
+            try {
+                const response = await fetch('/api/return', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ book_ids: bookIds })
+                });
+                const result = await response.json();
+
+                if (result.success) {
+                    hideLoading();
+                    nextStep('step-success');
+                    startAutoRedirect();
+                } else {
+                    hideLoading();
+                    alert(result.message || '還書失敗');
+                }
+            } catch (e) {
+                hideLoading();
+                console.error(e);
+                alert('系統錯誤');
+            }
+        }
+
+        // 定期檢查系統狀態（包含圖書館與機器通訊）
+        function checkSystemStatus() {
+            fetch('/api/status')
+                .then(response => response.json())
+                .then(data => {
+                    const overlay = document.getElementById('suspended-overlay');
+                    if (overlay) overlay.style.display = data.suspended ? 'flex' : 'none';
+
+                    // 更新圖書館 / 機器狀態顯示
+                    try {
+                        const libDot = document.getElementById('lib-dot');
+                        const libText = document.getElementById('lib-text');
+                        const machDot = document.getElementById('machine-dot');
+                        const machText = document.getElementById('machine-text');
+
+                        if (data.library_ok) {
+                            libDot.style.backgroundColor = '#2ecc71';
+                            libText.textContent = '可用';
+                        } else {
+                            libDot.style.backgroundColor = '#dc3545';
+                            libText.textContent = '連線失敗';
+                        }
+
+                        if (data.machine_ok) {
+                            machDot.style.backgroundColor = '#2ecc71';
+                            machText.textContent = '就緒';
+                        } else {
+                            machDot.style.backgroundColor = '#dc3545';
+                            machText.textContent = '離線';
+                        }
+                    } catch (e) {
+                        console.error('Update status UI failed', e);
+                    }
+                })
+                .catch(err => console.error('Status check failed', err));
+        }
+
+        // 當有人點擊螢幕時喚醒機器（節流 30 秒）
+        (function(){
+            let lastWake = 0;
+            const WAKE_THROTTLE_MS = 30000;
+            function tryWake() {
+                const now = Date.now();
+                if (now - lastWake < WAKE_THROTTLE_MS) return;
+                lastWake = now;
+                fetch('/api/hardware/wake', { method: 'POST' })
+                    .then(r => r.json().catch(()=>{}))
+                    .catch(()=>{});
+            }
+            // 對主要互動事件監聽（點擊、觸控、鍵盤）
+            document.addEventListener('click', tryWake);
+            document.addEventListener('touchstart', tryWake);
+            document.addEventListener('keypress', tryWake);
+        })();
+
+        // 每 5 秒檢查一次
+        setInterval(checkSystemStatus, 5000);
+    </script>
+</body>
+</html>

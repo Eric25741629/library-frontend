@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>圖書館管理後台登入</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        .login-container {
+            max-width: 400px;
+            margin: 5rem auto;
+            background: #fff;
+            padding: 2.5rem;
+            border-radius: 8px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+        .login-header {
+            margin-bottom: 2rem;
+        }
+        .login-header i {
+            font-size: 3rem;
+            color: var(--primary-blue);
+            margin-bottom: 1rem;
+        }
+        .login-header h2 {
+            color: #333;
+            font-size: 1.5rem;
+        }
+        .form-group {
+            margin-bottom: 1.5rem;
+            text-align: left;
+        }
+        .form-group label {
+            display: block;
+            margin-bottom: 0.5rem;
+            color: #666;
+        }
+        .form-control {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 1rem;
+            outline: none;
+            transition: border-color 0.3s;
+        }
+        .form-control:focus {
+            border-color: var(--primary-blue);
+        }
+        .error-message {
+            color: var(--danger-red);
+            margin-bottom: 1rem;
+            font-size: 0.9rem;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="login-container">
+        <div class="login-header">
+            <i class="fas fa-user-shield"></i>
+            <h2>管理後台登入</h2>
+        </div>
+        
+        <div id="error-msg" class="error-message">密碼錯誤，請重試</div>
+
+        <form id="login-form" onsubmit="handleLogin(event)">
+            <div class="form-group">
+                <label for="password">管理員密碼</label>
+                <input type="password" id="password" class="form-control" placeholder="請輸入密碼" required autofocus>
+            </div>
+            <button type="submit" class="btn-primary btn-block">
+                <i class="fas fa-sign-in-alt"></i> 登入
+            </button>
+        </form>
+        
+        <div style="margin-top: 1.5rem;">
+            <a href="/" style="color: #666; text-decoration: none; font-size: 0.9rem;">
+                <i class="fas fa-arrow-left"></i> 返回前台
+            </a>
+        </div>
+    </div>
+
+    <script>
+        // 閒置檢測 (5分鐘) - 自動返回首頁
+        let idleTime = 0;
+        const idleLimit = 5 * 60; // 5 minutes in seconds
+
+        function resetIdleTimer() {
+            idleTime = 0;
+        }
+
+        // 監聽使用者活動
+        document.addEventListener('mousemove', resetIdleTimer);
+        document.addEventListener('keypress', resetIdleTimer);
+        document.addEventListener('click', resetIdleTimer);
+
+        // 每秒檢查一次閒置時間
+        setInterval(() => {
+            idleTime++;
+            if (idleTime >= idleLimit) {
+                window.location.href = '/'; // 閒置過久返回前台首頁
+            }
+        }, 1000);
+
+        async function handleLogin(e) {
+            e.preventDefault();
+            const password = document.getElementById('password').value;
+            const errorMsg = document.getElementById('error-msg');
+            
+            try {
+                const response = await fetch('/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ password: password })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    window.location.href = '/admin';
+                } else {
+                    errorMsg.style.display = 'block';
+                    errorMsg.textContent = result.message || '登入失敗';
+                }
+            } catch (err) {
+                console.error(err);
+                errorMsg.style.display = 'block';
+                errorMsg.textContent = '系統錯誤';
+            }
+        }
+    </script>
+</body>
+</html>
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const pwd = document.getElementById('password');
+    if (pwd) pwd.focus();
+
+    // 全域鍵盤監聽：若不在輸入框，將焦點移至密碼欄，方便條碼掃描器（模擬鍵盤）直接輸入
+    document.addEventListener('keydown', (e) => {
+        const input = document.getElementById('password');
+        if (!input) return;
+        if (document.activeElement !== input && !e.ctrlKey && !e.altKey && !e.metaKey) {
+            input.focus();
+        }
+    });
+
+    // 當按下 Enter 時觸發登入（條碼掃描器通常會在末端送出 Enter）
+    const pwdInput = document.getElementById('password');
+    if (pwdInput) {
+        pwdInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                // 建立 submit 事件並傳遞給表單
+                const form = document.getElementById('login-form');
+                if (form) {
+                    form.dispatchEvent(new Event('submit', {cancelable: true, bubbles: true}));
+                }
+            }
+        });
+    }
+});
+</script>
