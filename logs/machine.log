@@ -1,261 +1,211 @@
-2025-11-27 05:16:25,311 WARNING machine: pyserial not found, forcing MOCK mode
-2025-11-27 05:16:27,313 INFO machine: MachineCommand SEND: dep1
-2025-11-27 05:16:27,313 ERROR machine: MachineCommand ERROR: Serial not open for cmd=dep1
-2025-11-27 05:16:27,313 WARNING machine: Init power on response: Error: Serial not open
-2025-11-27 05:16:29,314 INFO machine: MachineCommand SEND: homing
-2025-11-27 05:16:29,314 ERROR machine: MachineCommand ERROR: Serial not open for cmd=homing
-2025-11-27 05:16:29,624 WARNING machine: pyserial not found, forcing MOCK mode
-2025-11-27 05:16:31,624 INFO machine: MachineCommand SEND: dep1
-2025-11-27 05:16:31,625 ERROR machine: MachineCommand ERROR: Serial not open for cmd=dep1
-2025-11-27 05:16:31,625 WARNING machine: Init power on response: Error: Serial not open
-2025-11-27 05:16:33,625 INFO machine: MachineCommand SEND: homing
-2025-11-27 05:16:33,625 ERROR machine: MachineCommand ERROR: Serial not open for cmd=homing
-2025-11-27 05:20:33,388 WARNING machine: pyserial not found, forcing MOCK mode
-2025-11-27 05:20:35,388 INFO machine: MachineCommand SEND: dep1
-2025-11-27 05:20:35,388 ERROR machine: MachineCommand ERROR: Serial not open for cmd=dep1
-2025-11-27 05:20:35,388 WARNING machine: Init power on response: Error: Serial not open
-2025-11-27 05:20:37,389 INFO machine: MachineCommand SEND: homing
-2025-11-27 05:20:37,389 ERROR machine: MachineCommand ERROR: Serial not open for cmd=homing
-2025-11-27 05:20:49,739 WARNING machine: pyserial not found, forcing MOCK mode
-2025-11-27 05:20:51,740 INFO machine: MachineCommand SEND: dep1
-2025-11-27 05:20:51,740 ERROR machine: MachineCommand ERROR: Serial not open for cmd=dep1
-2025-11-27 05:20:51,740 WARNING machine: Init power on response: Error: Serial not open
-2025-11-27 05:20:53,740 INFO machine: MachineCommand SEND: homing
-2025-11-27 05:20:53,740 ERROR machine: MachineCommand ERROR: Serial not open for cmd=homing
-2025-11-27 05:31:29,320 INFO machine: Machine idle timeout, entering sleep mode (dep0)
-2025-11-27 05:31:29,321 INFO machine: MachineCommand SEND: dep0
-2025-11-27 05:31:29,321 ERROR machine: MachineCommand ERROR: Serial not open for cmd=dep0
-2025-11-27 05:31:58,659 INFO machine: MachineCommand SEND: open
-2025-11-27 05:31:58,659 ERROR machine: MachineCommand ERROR: Serial not open for cmd=open
-2025-11-27 05:33:12,155 WARNING machine: pyserial not found, forcing MOCK mode
-2025-11-27 05:33:14,155 INFO machine: MachineCommand SEND: dep1
-2025-11-27 05:33:14,155 ERROR machine: MachineCommand ERROR: Serial not open for cmd=dep1
-2025-11-27 05:33:14,155 WARNING machine: Init power on response: Error: Serial not open
-2025-11-27 05:33:16,156 INFO machine: MachineCommand SEND: homing
-2025-11-27 05:33:16,156 ERROR machine: MachineCommand ERROR: Serial not open for cmd=homing
-2025-11-27 05:33:16,425 WARNING machine: pyserial not found, forcing MOCK mode
-2025-11-27 05:33:18,426 INFO machine: MachineCommand SEND: dep1
-2025-11-27 05:33:18,426 ERROR machine: MachineCommand ERROR: Serial not open for cmd=dep1
-2025-11-27 05:33:18,426 WARNING machine: Init power on response: Error: Serial not open
-2025-11-27 05:33:20,427 INFO machine: MachineCommand SEND: homing
-2025-11-27 05:33:20,427 ERROR machine: MachineCommand ERROR: Serial not open for cmd=homing
-2025-11-27 05:33:57,721 WARNING machine: pyserial not found, forcing MOCK mode
-2025-11-27 05:33:59,722 INFO machine: MachineCommand SEND: dep1
-2025-11-27 05:33:59,722 ERROR machine: MachineCommand ERROR: Serial not open for cmd=dep1
-2025-11-27 05:33:59,722 WARNING machine: Init power on response: Error: Serial not open
-2025-11-27 05:34:01,722 INFO machine: MachineCommand SEND: homing
-2025-11-27 05:34:01,723 ERROR machine: MachineCommand ERROR: Serial not open for cmd=homing
-2025-11-27 05:34:01,979 WARNING machine: pyserial not found, forcing MOCK mode
-2025-11-27 05:34:03,979 INFO machine: MachineCommand SEND: dep1
-2025-11-27 05:34:03,980 ERROR machine: MachineCommand ERROR: Serial not open for cmd=dep1
-2025-11-27 05:34:03,980 WARNING machine: Init power on response: Error: Serial not open
-2025-11-27 05:34:05,980 INFO machine: MachineCommand SEND: homing
-2025-11-27 05:34:05,980 ERROR machine: MachineCommand ERROR: Serial not open for cmd=homing
-2025-11-27 05:34:31,359 WARNING machine: pyserial not found, forcing MOCK mode
-2025-11-27 05:34:33,359 INFO machine: MachineCommand SEND: dep1
-2025-11-27 05:34:33,359 ERROR machine: MachineCommand ERROR: Serial not open for cmd=dep1
-2025-11-27 05:34:33,359 WARNING machine: Init power on response: Error: Serial not open
-2025-11-27 05:34:35,359 INFO machine: MachineCommand SEND: homing
-2025-11-27 05:34:35,360 ERROR machine: MachineCommand ERROR: Serial not open for cmd=homing
-2025-11-27 05:34:36,667 WARNING machine: pyserial not found, forcing MOCK mode
-2025-11-27 05:34:38,668 INFO machine: MachineCommand SEND: dep1
-2025-11-27 05:34:38,668 ERROR machine: MachineCommand ERROR: Serial not open for cmd=dep1
-2025-11-27 05:34:38,668 WARNING machine: Init power on response: Error: Serial not open
-2025-11-27 05:34:40,668 INFO machine: MachineCommand SEND: homing
-2025-11-27 05:34:40,668 ERROR machine: MachineCommand ERROR: Serial not open for cmd=homing
-2025-11-27 05:34:57,724 WARNING machine: pyserial not found, forcing MOCK mode
-2025-11-27 05:34:59,724 INFO machine: MachineCommand SEND: dep1
-2025-11-27 05:34:59,724 ERROR machine: MachineCommand ERROR: Serial not open for cmd=dep1
-2025-11-27 05:34:59,724 WARNING machine: Init power on response: Error: Serial not open
-2025-11-27 05:35:01,724 INFO machine: MachineCommand SEND: homing
-2025-11-27 05:35:01,725 ERROR machine: MachineCommand ERROR: Serial not open for cmd=homing
-2025-11-27 05:35:01,995 WARNING machine: pyserial not found, forcing MOCK mode
-2025-11-27 05:35:03,995 INFO machine: MachineCommand SEND: dep1
-2025-11-27 05:35:03,995 ERROR machine: MachineCommand ERROR: Serial not open for cmd=dep1
-2025-11-27 05:35:03,995 WARNING machine: Init power on response: Error: Serial not open
-2025-11-27 05:35:05,996 INFO machine: MachineCommand SEND: homing
-2025-11-27 05:35:05,996 ERROR machine: MachineCommand ERROR: Serial not open for cmd=homing
-2025-11-27 05:37:55,612 WARNING machine: pyserial not found, forcing MOCK mode
-2025-11-27 05:37:55,614 WARNING machine: pyserial not found, forcing MOCK mode
-2025-11-27 05:37:57,615 INFO machine: MachineCommand SEND: dep1
-2025-11-27 05:37:57,615 INFO machine: [MOCK] Sending command: dep1
-2025-11-27 05:37:58,115 INFO machine: MachineCommand RECV (mock): dep1 -> device power on
-2025-11-27 05:38:00,116 INFO machine: MachineCommand SEND: homing
-2025-11-27 05:38:00,116 INFO machine: [MOCK] Sending command: homing
-2025-11-27 05:38:00,616 INFO machine: MachineCommand RECV (mock): homing -> ack
-2025-11-27 05:39:13,055 WARNING machine: pyserial not found, forcing MOCK mode
-2025-11-27 05:39:13,056 WARNING machine: pyserial not found, forcing MOCK mode
-2025-11-27 05:39:15,057 INFO machine: MachineCommand SEND: dep1
-2025-11-27 05:39:15,057 INFO machine: [MOCK] Sending command: dep1
-2025-11-27 05:39:15,557 INFO machine: MachineCommand RECV (mock): dep1 -> device power on
-2025-11-27 05:39:17,558 INFO machine: MachineCommand SEND: homing
-2025-11-27 05:39:17,558 INFO machine: [MOCK] Sending command: homing
-2025-11-27 05:39:18,058 INFO machine: MachineCommand RECV (mock): homing -> ack
-2025-11-27 05:40:59,425 INFO machine: MachineCommand SEND: open
-2025-11-27 05:40:59,425 INFO machine: [MOCK] Sending command: open
-2025-11-27 05:40:59,926 INFO machine: MachineCommand RECV (mock): open -> opened
-2025-11-27 05:41:02,204 INFO machine: MachineCommand SEND: close
-2025-11-27 05:41:02,204 INFO machine: [MOCK] Sending command: close
-2025-11-27 05:41:02,704 INFO machine: MachineCommand RECV (mock): close -> closed
-2025-11-27 05:41:04,205 INFO machine: MachineCommand SEND: bookok
-2025-11-27 05:41:04,205 INFO machine: [MOCK] Sending command: bookok
-2025-11-27 05:41:04,705 INFO machine: MachineCommand RECV (mock): bookok -> book is ok
-2025-11-27 05:41:06,205 INFO machine: MachineCommand SEND: put1
-2025-11-27 05:41:06,205 INFO machine: [MOCK] Sending command: put1
-2025-11-27 05:41:06,706 INFO machine: MachineCommand RECV (mock): put1 -> been put1
-2025-11-27 05:41:09,013 INFO machine: MachineCommand SEND: open
-2025-11-27 05:41:09,013 INFO machine: [MOCK] Sending command: open
-2025-11-27 05:41:09,514 INFO machine: MachineCommand RECV (mock): open -> opened
-2025-11-27 05:41:12,550 INFO machine: MachineCommand SEND: close
-2025-11-27 05:41:12,550 INFO machine: [MOCK] Sending command: close
-2025-11-27 05:41:13,051 INFO machine: MachineCommand RECV (mock): close -> closed
-2025-11-27 05:41:14,550 INFO machine: MachineCommand SEND: bookok
-2025-11-27 05:41:14,550 INFO machine: [MOCK] Sending command: bookok
-2025-11-27 05:41:15,051 INFO machine: MachineCommand RECV (mock): bookok -> book is ok
-2025-11-27 05:41:16,551 INFO machine: MachineCommand SEND: put1
-2025-11-27 05:41:16,551 INFO machine: [MOCK] Sending command: put1
-2025-11-27 05:41:17,051 INFO machine: MachineCommand RECV (mock): put1 -> been put1
-2025-11-27 05:46:08,108 WARNING machine: pyserial not found, forcing MOCK mode
-2025-11-27 05:46:08,110 WARNING machine: pyserial not found, forcing MOCK mode
-2025-11-27 05:46:10,111 INFO machine: MachineCommand SEND: dep1
-2025-11-27 05:46:10,111 INFO machine: [MOCK] Sending command: dep1
-2025-11-27 05:46:10,612 INFO machine: MachineCommand RECV (mock): dep1 -> device power on
-2025-11-27 05:46:12,612 INFO machine: MachineCommand SEND: homing
-2025-11-27 05:46:12,612 INFO machine: [MOCK] Sending command: homing
-2025-11-27 05:46:13,112 INFO machine: MachineCommand RECV (mock): homing -> ack
-2025-11-27 05:50:01,732 INFO machine: Machine idle timeout, entering sleep mode (dep0)
-2025-11-27 05:50:01,732 INFO machine: MachineCommand SEND: dep0
-2025-11-27 05:50:01,732 ERROR machine: MachineCommand ERROR: Serial not open for cmd=dep0
-2025-11-27 06:01:13,119 INFO machine: Machine idle timeout, entering sleep mode (dep0)
-2025-11-27 06:01:13,119 INFO machine: MachineCommand SEND: dep0
-2025-11-27 06:01:13,119 INFO machine: [MOCK] Sending command: dep0
-2025-11-27 06:01:13,620 INFO machine: MachineCommand RECV (mock): dep0 -> device power off
-2025-11-27 06:01:45,239 WARNING machine: pyserial not found, forcing MOCK mode
-2025-11-27 06:01:45,240 WARNING machine: pyserial not found, forcing MOCK mode
-2025-11-27 06:01:47,241 INFO machine: MachineCommand SEND: dep1
-2025-11-27 06:01:47,241 INFO machine: [MOCK] Sending command: dep1
-2025-11-27 06:01:47,741 INFO machine: MachineCommand RECV (mock): dep1 -> device power on
-2025-11-27 06:01:49,742 INFO machine: MachineCommand SEND: homing
-2025-11-27 06:01:49,742 INFO machine: [MOCK] Sending command: homing
-2025-11-27 06:01:50,242 INFO machine: MachineCommand RECV (mock): homing -> ack
-2025-11-27 06:01:50,531 WARNING machine: pyserial not found, forcing MOCK mode
-2025-11-27 06:01:50,532 WARNING machine: pyserial not found, forcing MOCK mode
-2025-11-27 06:01:52,533 INFO machine: MachineCommand SEND: dep1
-2025-11-27 06:01:52,533 INFO machine: [MOCK] Sending command: dep1
-2025-11-27 06:01:53,033 INFO machine: MachineCommand RECV (mock): dep1 -> device power on
-2025-11-27 06:01:55,034 INFO machine: MachineCommand SEND: homing
-2025-11-27 06:01:55,034 INFO machine: [MOCK] Sending command: homing
-2025-11-27 06:01:55,534 INFO machine: MachineCommand RECV (mock): homing -> ack
-2025-11-27 06:03:01,338 WARNING machine: pyserial not found, forcing MOCK mode
-2025-11-27 06:03:01,339 WARNING machine: pyserial not found, forcing MOCK mode
-2025-11-27 06:03:03,340 INFO machine: MachineCommand SEND: dep1
-2025-11-27 06:03:03,340 INFO machine: [MOCK] Sending command: dep1
-2025-11-27 06:03:03,840 INFO machine: MachineCommand RECV (mock): dep1 -> device power on
-2025-11-27 06:03:05,841 INFO machine: MachineCommand SEND: homing
-2025-11-27 06:03:05,841 INFO machine: [MOCK] Sending command: homing
-2025-11-27 06:03:06,341 INFO machine: MachineCommand RECV (mock): homing -> ack
-2025-11-27 06:03:06,610 WARNING machine: pyserial not found, forcing MOCK mode
-2025-11-27 06:03:06,611 WARNING machine: pyserial not found, forcing MOCK mode
-2025-11-27 06:03:08,611 INFO machine: MachineCommand SEND: dep1
-2025-11-27 06:03:08,611 INFO machine: [MOCK] Sending command: dep1
-2025-11-27 06:03:09,112 INFO machine: MachineCommand RECV (mock): dep1 -> device power on
-2025-11-27 06:03:11,112 INFO machine: MachineCommand SEND: homing
-2025-11-27 06:03:11,113 INFO machine: [MOCK] Sending command: homing
-2025-11-27 06:03:11,613 INFO machine: MachineCommand RECV (mock): homing -> ack
-2025-11-27 06:18:06,347 INFO machine: Machine idle timeout, entering sleep mode (dep0)
-2025-11-27 06:18:06,348 INFO machine: MachineCommand SEND: dep0
-2025-11-27 06:18:06,348 INFO machine: [MOCK] Sending command: dep0
-2025-11-27 06:18:06,848 INFO machine: MachineCommand RECV (mock): dep0 -> device power off
-2025-11-27 06:18:11,620 INFO machine: Machine idle timeout, entering sleep mode (dep0)
-2025-11-27 06:18:11,620 INFO machine: MachineCommand SEND: dep0
-2025-11-27 06:18:11,620 INFO machine: [MOCK] Sending command: dep0
-2025-11-27 06:18:12,120 INFO machine: MachineCommand RECV (mock): dep0 -> device power off
-2025-11-27 07:36:35,755 INFO machine: Waking up machine...
-2025-11-27 07:36:35,755 INFO machine: MachineCommand SEND: dep1
-2025-11-27 07:36:35,755 INFO machine: [MOCK] Sending command: dep1
-2025-11-27 07:36:36,255 INFO machine: MachineCommand RECV (mock): dep1 -> device power on
-2025-11-27 07:52:12,153 INFO machine: Machine idle timeout, entering sleep mode (dep0)
-2025-11-27 07:52:12,153 INFO machine: MachineCommand SEND: dep0
-2025-11-27 07:52:12,153 INFO machine: [MOCK] Sending command: dep0
-2025-11-27 07:52:12,654 INFO machine: MachineCommand RECV (mock): dep0 -> device power off
-2025-11-27 09:04:33,595 INFO machine: Waking up machine...
-2025-11-27 09:04:33,596 INFO machine: MachineCommand SEND: dep1
-2025-11-27 09:04:33,596 INFO machine: [MOCK] Sending command: dep1
-2025-11-27 09:04:34,096 INFO machine: MachineCommand RECV (mock): dep1 -> device power on
-2025-11-27 09:04:44,466 WARNING machine: pyserial not found, forcing MOCK mode
-2025-11-27 09:04:44,468 WARNING machine: pyserial not found, forcing MOCK mode
-2025-11-27 09:04:46,469 INFO machine: MachineCommand SEND: dep1
-2025-11-27 09:04:46,469 INFO machine: [MOCK] Sending command: dep1
-2025-11-27 09:04:46,969 INFO machine: MachineCommand RECV (mock): dep1 -> device power on
-2025-11-27 09:04:48,969 INFO machine: MachineCommand SEND: homing
-2025-11-27 09:04:48,969 INFO machine: [MOCK] Sending command: homing
-2025-11-27 09:04:49,470 INFO machine: MachineCommand RECV (mock): homing -> ack
-2025-11-27 09:04:49,726 WARNING machine: pyserial not found, forcing MOCK mode
-2025-11-27 09:04:49,727 WARNING machine: pyserial not found, forcing MOCK mode
-2025-11-27 09:04:51,728 INFO machine: MachineCommand SEND: dep1
-2025-11-27 09:04:51,728 INFO machine: [MOCK] Sending command: dep1
-2025-11-27 09:04:52,229 INFO machine: MachineCommand RECV (mock): dep1 -> device power on
-2025-11-27 09:04:54,229 INFO machine: MachineCommand SEND: homing
-2025-11-27 09:04:54,229 INFO machine: [MOCK] Sending command: homing
-2025-11-27 09:04:54,730 INFO machine: MachineCommand RECV (mock): homing -> ack
-2025-11-27 09:07:38,608 WARNING machine: pyserial not found, forcing MOCK mode
-2025-11-27 09:07:38,610 WARNING machine: pyserial not found, forcing MOCK mode
-2025-11-27 09:07:40,610 INFO machine: MachineCommand SEND: dep1
-2025-11-27 09:07:40,610 INFO machine: [MOCK] Sending command: dep1
-2025-11-27 09:07:41,111 INFO machine: MachineCommand RECV (mock): dep1 -> device power on
-2025-11-27 09:07:43,111 INFO machine: MachineCommand SEND: homing
-2025-11-27 09:07:43,111 INFO machine: [MOCK] Sending command: homing
-2025-11-27 09:07:43,612 INFO machine: MachineCommand RECV (mock): homing -> ack
-2025-11-27 09:07:43,893 WARNING machine: pyserial not found, forcing MOCK mode
-2025-11-27 09:07:43,895 WARNING machine: pyserial not found, forcing MOCK mode
-2025-11-27 09:07:45,895 INFO machine: MachineCommand SEND: dep1
-2025-11-27 09:07:45,895 INFO machine: [MOCK] Sending command: dep1
-2025-11-27 09:07:46,395 INFO machine: MachineCommand RECV (mock): dep1 -> device power on
-2025-11-27 09:07:48,396 INFO machine: MachineCommand SEND: homing
-2025-11-27 09:07:48,396 INFO machine: [MOCK] Sending command: homing
-2025-11-27 09:07:48,896 INFO machine: MachineCommand RECV (mock): homing -> ack
-2025-11-27 09:22:43,619 INFO machine: Machine idle timeout, entering sleep mode (dep0)
-2025-11-27 09:22:43,619 INFO machine: MachineCommand SEND: dep0
-2025-11-27 09:22:43,619 INFO machine: [MOCK] Sending command: dep0
-2025-11-27 09:22:44,119 INFO machine: MachineCommand RECV (mock): dep0 -> device power off
-2025-11-27 09:22:48,903 INFO machine: Machine idle timeout, entering sleep mode (dep0)
-2025-11-27 09:22:48,903 INFO machine: MachineCommand SEND: dep0
-2025-11-27 09:22:48,903 INFO machine: [MOCK] Sending command: dep0
-2025-11-27 09:22:49,403 INFO machine: MachineCommand RECV (mock): dep0 -> device power off
-2025-11-27 10:11:03,436 WARNING machine: pyserial not found, forcing MOCK mode
-2025-11-27 10:11:03,438 WARNING machine: pyserial not found, forcing MOCK mode
-2025-11-27 10:11:05,438 INFO machine: MachineCommand SEND: dep1
-2025-11-27 10:11:05,438 INFO machine: [MOCK] Sending command: dep1
-2025-11-27 10:11:05,938 INFO machine: MachineCommand RECV (mock): dep1 -> device power on
-2025-11-27 10:11:07,939 INFO machine: MachineCommand SEND: homing
-2025-11-27 10:11:07,939 INFO machine: [MOCK] Sending command: homing
-2025-11-27 10:11:08,440 INFO machine: MachineCommand RECV (mock): homing -> ack
-2025-11-27 10:13:15,219 INFO machine: MachineCommand SEND: open
-2025-11-27 10:13:15,219 INFO machine: [MOCK] Sending command: open
-2025-11-27 10:13:15,719 INFO machine: MachineCommand RECV (mock): open -> opened
-2025-11-27 10:17:35,413 WARNING machine: pyserial not found, forcing MOCK mode
-2025-11-27 10:17:35,414 WARNING machine: pyserial not found, forcing MOCK mode
-2025-11-27 10:17:37,414 INFO machine: MachineCommand SEND: dep1
-2025-11-27 10:17:37,414 INFO machine: [MOCK] Sending command: dep1
-2025-11-27 10:17:37,914 INFO machine: MachineCommand RECV (mock): dep1 -> device power on
-2025-11-27 10:17:39,915 INFO machine: MachineCommand SEND: homing
-2025-11-27 10:17:39,915 INFO machine: [MOCK] Sending command: homing
-2025-11-27 10:17:40,415 INFO machine: MachineCommand RECV (mock): homing -> ack
-2025-11-27 10:20:02,099 WARNING machine: pyserial not found, forcing MOCK mode
-2025-11-27 10:20:02,100 WARNING machine: pyserial not found, forcing MOCK mode
-2025-11-27 10:20:04,101 INFO machine: MachineCommand SEND: dep1
-2025-11-27 10:20:04,101 INFO machine: [MOCK] Sending command: dep1
-2025-11-27 10:20:04,601 INFO machine: MachineCommand RECV (mock): dep1 -> device power on
-2025-11-27 10:20:06,602 INFO machine: MachineCommand SEND: homing
-2025-11-27 10:20:06,602 INFO machine: [MOCK] Sending command: homing
-2025-11-27 10:20:07,103 INFO machine: MachineCommand RECV (mock): homing -> ack
-2025-11-27 10:20:08,398 WARNING machine: pyserial not found, forcing MOCK mode
-2025-11-27 10:20:08,399 WARNING machine: pyserial not found, forcing MOCK mode
-2025-11-27 10:20:10,399 INFO machine: MachineCommand SEND: dep1
-2025-11-27 10:20:10,400 INFO machine: [MOCK] Sending command: dep1
-2025-11-27 10:20:10,900 INFO machine: MachineCommand RECV (mock): dep1 -> device power on
-2025-11-27 10:20:12,901 INFO machine: MachineCommand SEND: homing
-2025-11-27 10:20:12,901 INFO machine: [MOCK] Sending command: homing
-2025-11-27 10:20:13,402 INFO machine: MachineCommand RECV (mock): homing -> ack
-2025-11-27 10:22:55,002 WARNING machine: pyserial not found, forcing MOCK mode
-2025-11-27 10:22:55,004 WARNING machine: pyserial not found, forcing MOCK mode
+2025-11-29 04:59:02,055 WARNING machine: pyserial not found, forcing MOCK mode
+2025-11-29 04:59:02,058 WARNING machine: pyserial not found, forcing MOCK mode
+2025-11-29 04:59:04,059 INFO machine: MachineCommand SEND: dep1
+2025-11-29 04:59:04,059 INFO machine: [MOCK] Sending command: dep1
+2025-11-29 04:59:04,559 INFO machine: MachineCommand RECV (mock): dep1 -> device power on
+2025-11-29 04:59:06,560 INFO machine: MachineCommand SEND: homing
+2025-11-29 04:59:06,560 INFO machine: [MOCK] Sending command: homing
+2025-11-29 04:59:07,060 INFO machine: MachineCommand RECV (mock): homing -> ack
+2025-11-29 04:59:07,331 WARNING machine: pyserial not found, forcing MOCK mode
+2025-11-29 04:59:07,332 WARNING machine: pyserial not found, forcing MOCK mode
+2025-11-29 04:59:09,333 INFO machine: MachineCommand SEND: dep1
+2025-11-29 04:59:09,333 INFO machine: [MOCK] Sending command: dep1
+2025-11-29 04:59:09,834 INFO machine: MachineCommand RECV (mock): dep1 -> device power on
+2025-11-29 04:59:11,835 INFO machine: MachineCommand SEND: homing
+2025-11-29 04:59:11,835 INFO machine: [MOCK] Sending command: homing
+2025-11-29 04:59:12,335 INFO machine: MachineCommand RECV (mock): homing -> ack
+2025-11-29 04:59:23,346 INFO machine: MachineCommand SEND: open
+2025-11-29 04:59:23,347 INFO machine: [MOCK] Sending command: open
+2025-11-29 04:59:23,847 INFO machine: MachineCommand RECV (mock): open -> opened
+2025-11-29 05:02:12,647 INFO machine: MachineCommand SEND: open
+2025-11-29 05:02:12,647 INFO machine: [MOCK] Sending command: open
+2025-11-29 05:02:13,147 INFO machine: MachineCommand RECV (mock): open -> opened
+2025-11-29 05:05:52,923 INFO machine: MachineCommand SEND: open
+2025-11-29 05:05:52,923 INFO machine: [MOCK] Sending command: open
+2025-11-29 05:05:53,424 INFO machine: MachineCommand RECV (mock): open -> opened
+2025-11-29 05:06:38,829 INFO machine: MachineCommand SEND: close
+2025-11-29 05:06:38,830 INFO machine: [MOCK] Sending command: close
+2025-11-29 05:06:39,330 INFO machine: MachineCommand RECV (mock): close -> closed
+2025-11-29 05:06:40,830 INFO machine: MachineCommand SEND: bookok
+2025-11-29 05:06:40,830 INFO machine: [MOCK] Sending command: bookok
+2025-11-29 05:06:41,330 INFO machine: MachineCommand RECV (mock): bookok -> book is ok
+2025-11-29 05:06:42,830 INFO machine: MachineCommand SEND: put1
+2025-11-29 05:06:42,830 INFO machine: [MOCK] Sending command: put1
+2025-11-29 05:06:43,331 INFO machine: MachineCommand RECV (mock): put1 -> been put1
+2025-11-29 05:06:54,028 INFO machine: MachineCommand SEND: open
+2025-11-29 05:06:54,028 INFO machine: [MOCK] Sending command: open
+2025-11-29 05:06:54,528 INFO machine: MachineCommand RECV (mock): open -> opened
+2025-11-29 05:06:59,702 INFO machine: MachineCommand SEND: close
+2025-11-29 05:06:59,702 INFO machine: [MOCK] Sending command: close
+2025-11-29 05:07:00,202 INFO machine: MachineCommand RECV (mock): close -> closed
+2025-11-29 05:07:01,702 INFO machine: MachineCommand SEND: bookok
+2025-11-29 05:07:01,702 INFO machine: [MOCK] Sending command: bookok
+2025-11-29 05:07:02,202 INFO machine: MachineCommand RECV (mock): bookok -> book is ok
+2025-11-29 05:07:03,702 INFO machine: MachineCommand SEND: put1
+2025-11-29 05:07:03,702 INFO machine: [MOCK] Sending command: put1
+2025-11-29 05:07:04,203 INFO machine: MachineCommand RECV (mock): put1 -> been put1
+2025-11-29 05:08:52,854 INFO machine: MachineCommand SEND: open
+2025-11-29 05:08:52,854 INFO machine: [MOCK] Sending command: open
+2025-11-29 05:08:53,355 INFO machine: MachineCommand RECV (mock): open -> opened
+2025-11-29 05:14:07,067 INFO machine: Machine idle timeout, entering sleep mode (dep0)
+2025-11-29 05:14:07,067 INFO machine: MachineCommand SEND: dep0
+2025-11-29 05:14:07,067 INFO machine: [MOCK] Sending command: dep0
+2025-11-29 05:14:07,568 INFO machine: MachineCommand RECV (mock): dep0 -> device power off
+2025-11-29 05:16:29,989 INFO machine: MachineCommand SEND: open
+2025-11-29 05:16:29,989 INFO machine: [MOCK] Sending command: open
+2025-11-29 05:16:30,490 INFO machine: MachineCommand RECV (mock): open -> opened
+2025-11-29 05:16:50,462 WARNING machine: pyserial not found, forcing MOCK mode
+2025-11-29 05:16:50,463 WARNING machine: pyserial not found, forcing MOCK mode
+2025-11-29 05:16:52,464 INFO machine: MachineCommand SEND: dep1
+2025-11-29 05:16:52,464 INFO machine: [MOCK] Sending command: dep1
+2025-11-29 05:16:52,965 INFO machine: MachineCommand RECV (mock): dep1 -> device power on
+2025-11-29 05:16:54,965 INFO machine: MachineCommand SEND: homing
+2025-11-29 05:16:54,965 INFO machine: [MOCK] Sending command: homing
+2025-11-29 05:16:55,466 INFO machine: MachineCommand RECV (mock): homing -> ack
+2025-11-29 05:20:23,731 INFO machine: MachineCommand SEND: open
+2025-11-29 05:20:23,731 INFO machine: [MOCK] Sending command: open
+2025-11-29 05:20:24,232 INFO machine: MachineCommand RECV (mock): open -> opened
+2025-11-29 05:20:34,663 INFO machine: MachineCommand SEND: open
+2025-11-29 05:20:34,663 INFO machine: [MOCK] Sending command: open
+2025-11-29 05:20:35,164 INFO machine: MachineCommand RECV (mock): open -> opened
+2025-11-29 05:20:53,374 INFO machine: MachineCommand SEND: open
+2025-11-29 05:20:53,375 INFO machine: [MOCK] Sending command: open
+2025-11-29 05:20:53,875 INFO machine: MachineCommand RECV (mock): open -> opened
+2025-11-29 05:22:24,656 INFO machine: MachineCommand SEND: open
+2025-11-29 05:22:24,656 INFO machine: [MOCK] Sending command: open
+2025-11-29 05:22:25,157 INFO machine: MachineCommand RECV (mock): open -> opened
+2025-11-29 05:25:58,781 INFO machine: MachineCommand SEND: open
+2025-11-29 05:25:58,781 INFO machine: [MOCK] Sending command: open
+2025-11-29 05:25:59,282 INFO machine: MachineCommand RECV (mock): open -> opened
+2025-11-29 05:27:21,996 INFO machine: MachineCommand SEND: open
+2025-11-29 05:27:21,996 INFO machine: [MOCK] Sending command: open
+2025-11-29 05:27:22,496 INFO machine: MachineCommand RECV (mock): open -> opened
+2025-11-29 05:29:24,847 INFO machine: MachineCommand SEND: open
+2025-11-29 05:29:24,847 INFO machine: [MOCK] Sending command: open
+2025-11-29 05:29:25,348 INFO machine: MachineCommand RECV (mock): open -> opened
+2025-11-29 05:30:46,573 INFO machine: MachineCommand SEND: open
+2025-11-29 05:30:46,573 INFO machine: [MOCK] Sending command: open
+2025-11-29 05:30:47,073 INFO machine: MachineCommand RECV (mock): open -> opened
+2025-11-29 05:31:55,473 INFO machine: Machine idle timeout, entering sleep mode (dep0)
+2025-11-29 05:31:55,473 INFO machine: MachineCommand SEND: dep0
+2025-11-29 05:31:55,473 INFO machine: [MOCK] Sending command: dep0
+2025-11-29 05:31:55,974 INFO machine: MachineCommand RECV (mock): dep0 -> device power off
+2025-11-29 05:32:38,155 INFO machine: MachineCommand SEND: close
+2025-11-29 05:32:38,155 INFO machine: [MOCK] Sending command: close
+2025-11-29 05:32:38,456 INFO machine: Waking up machine...
+2025-11-29 05:32:38,656 INFO machine: MachineCommand RECV (mock): close -> closed
+2025-11-29 05:32:40,156 INFO machine: MachineCommand SEND: dep1
+2025-11-29 05:32:40,156 INFO machine: [MOCK] Sending command: dep1
+2025-11-29 05:32:40,656 INFO machine: MachineCommand RECV (mock): dep1 -> device power on
+2025-11-29 05:32:42,156 INFO machine: MachineCommand SEND: bookok
+2025-11-29 05:32:42,156 INFO machine: [MOCK] Sending command: bookok
+2025-11-29 05:32:42,656 INFO machine: MachineCommand RECV (mock): bookok -> book is ok
+2025-11-29 05:32:44,156 INFO machine: MachineCommand SEND: put1
+2025-11-29 05:32:44,156 INFO machine: [MOCK] Sending command: put1
+2025-11-29 05:32:44,657 INFO machine: MachineCommand RECV (mock): put1 -> been put1
+2025-11-29 05:33:03,008 WARNING machine: pyserial not found, forcing MOCK mode
+2025-11-29 05:33:03,010 WARNING machine: pyserial not found, forcing MOCK mode
+2025-11-29 05:33:05,010 INFO machine: MachineCommand SEND: dep1
+2025-11-29 05:33:05,010 INFO machine: [MOCK] Sending command: dep1
+2025-11-29 05:33:05,511 INFO machine: MachineCommand RECV (mock): dep1 -> device power on
+2025-11-29 05:33:07,511 INFO machine: MachineCommand SEND: homing
+2025-11-29 05:33:07,511 INFO machine: [MOCK] Sending command: homing
+2025-11-29 05:33:08,012 INFO machine: MachineCommand RECV (mock): homing -> ack
+2025-11-29 05:33:08,389 WARNING machine: pyserial not found, forcing MOCK mode
+2025-11-29 05:33:08,390 WARNING machine: pyserial not found, forcing MOCK mode
+2025-11-29 05:33:10,391 INFO machine: MachineCommand SEND: dep1
+2025-11-29 05:33:10,391 INFO machine: [MOCK] Sending command: dep1
+2025-11-29 05:33:10,891 INFO machine: MachineCommand RECV (mock): dep1 -> device power on
+2025-11-29 05:33:12,892 INFO machine: MachineCommand SEND: homing
+2025-11-29 05:33:12,892 INFO machine: [MOCK] Sending command: homing
+2025-11-29 05:33:13,392 INFO machine: MachineCommand RECV (mock): homing -> ack
+2025-11-29 05:33:19,458 INFO machine: MachineCommand SEND: open
+2025-11-29 05:33:19,458 INFO machine: [MOCK] Sending command: open
+2025-11-29 05:33:19,958 INFO machine: MachineCommand RECV (mock): open -> opened
+2025-11-29 05:33:21,768 INFO machine: MachineCommand SEND: close
+2025-11-29 05:33:21,768 INFO machine: [MOCK] Sending command: close
+2025-11-29 05:33:22,269 INFO machine: MachineCommand RECV (mock): close -> closed
+2025-11-29 05:33:23,769 INFO machine: MachineCommand SEND: bookok
+2025-11-29 05:33:23,769 INFO machine: [MOCK] Sending command: bookok
+2025-11-29 05:33:24,269 INFO machine: MachineCommand RECV (mock): bookok -> book is ok
+2025-11-29 05:33:25,769 INFO machine: MachineCommand SEND: put1
+2025-11-29 05:33:25,769 INFO machine: [MOCK] Sending command: put1
+2025-11-29 05:33:26,270 INFO machine: MachineCommand RECV (mock): put1 -> been put1
+2025-11-29 05:41:25,259 INFO machine: MachineCommand SEND: open
+2025-11-29 05:41:25,259 INFO machine: [MOCK] Sending command: open
+2025-11-29 05:41:25,760 INFO machine: MachineCommand RECV (mock): open -> opened
+2025-11-29 05:41:27,369 INFO machine: MachineCommand SEND: close
+2025-11-29 05:41:27,369 INFO machine: [MOCK] Sending command: close
+2025-11-29 05:41:27,869 INFO machine: MachineCommand RECV (mock): close -> closed
+2025-11-29 05:41:29,369 INFO machine: MachineCommand SEND: bookok
+2025-11-29 05:41:29,369 INFO machine: [MOCK] Sending command: bookok
+2025-11-29 05:41:29,870 INFO machine: MachineCommand RECV (mock): bookok -> book is ok
+2025-11-29 05:41:31,370 INFO machine: MachineCommand SEND: put1
+2025-11-29 05:41:31,370 INFO machine: [MOCK] Sending command: put1
+2025-11-29 05:41:31,871 INFO machine: MachineCommand RECV (mock): put1 -> been put1
+2025-11-29 05:41:43,591 WARNING machine: pyserial not found, forcing MOCK mode
+2025-11-29 05:41:43,593 WARNING machine: pyserial not found, forcing MOCK mode
+2025-11-29 05:41:45,593 INFO machine: MachineCommand SEND: dep1
+2025-11-29 05:41:45,593 INFO machine: [MOCK] Sending command: dep1
+2025-11-29 05:41:46,094 INFO machine: MachineCommand RECV (mock): dep1 -> device power on
+2025-11-29 05:41:48,094 INFO machine: MachineCommand SEND: homing
+2025-11-29 05:41:48,094 INFO machine: [MOCK] Sending command: homing
+2025-11-29 05:41:48,595 INFO machine: MachineCommand RECV (mock): homing -> ack
+2025-11-29 05:41:50,094 INFO machine: MachineCommand SEND: open
+2025-11-29 05:41:50,095 INFO machine: [MOCK] Sending command: open
+2025-11-29 05:41:50,595 INFO machine: MachineCommand RECV (mock): open -> opened
+2025-11-29 05:43:18,080 WARNING machine: pyserial not found, forcing MOCK mode
+2025-11-29 05:43:18,081 WARNING machine: pyserial not found, forcing MOCK mode
+2025-11-29 05:43:20,082 INFO machine: MachineCommand SEND: dep1
+2025-11-29 05:43:20,082 INFO machine: [MOCK] Sending command: dep1
+2025-11-29 05:43:20,582 INFO machine: MachineCommand RECV (mock): dep1 -> device power on
+2025-11-29 05:43:22,582 INFO machine: MachineCommand SEND: homing
+2025-11-29 05:43:22,583 INFO machine: [MOCK] Sending command: homing
+2025-11-29 05:43:23,083 INFO machine: MachineCommand RECV (mock): homing -> ack
+2025-11-29 05:44:59,089 INFO machine: MachineCommand SEND: close
+2025-11-29 05:44:59,089 INFO machine: [MOCK] Sending command: close
+2025-11-29 05:44:59,590 INFO machine: MachineCommand RECV (mock): close -> closed
+2025-11-29 05:45:01,090 INFO machine: MachineCommand SEND: bookok
+2025-11-29 05:45:01,090 INFO machine: [MOCK] Sending command: bookok
+2025-11-29 05:45:01,590 INFO machine: MachineCommand RECV (mock): bookok -> book is ok
+2025-11-29 05:45:03,090 INFO machine: MachineCommand SEND: put1
+2025-11-29 05:45:03,090 INFO machine: [MOCK] Sending command: put1
+2025-11-29 05:45:03,591 INFO machine: MachineCommand RECV (mock): put1 -> been put1
+2025-11-29 05:47:17,789 INFO machine: MachineCommand SEND: open
+2025-11-29 05:47:17,789 INFO machine: [MOCK] Sending command: open
+2025-11-29 05:47:18,289 INFO machine: MachineCommand RECV (mock): open -> opened
+2025-11-29 05:47:21,663 INFO machine: MachineCommand SEND: close
+2025-11-29 05:47:21,663 INFO machine: [MOCK] Sending command: close
+2025-11-29 05:47:22,163 INFO machine: MachineCommand RECV (mock): close -> closed
+2025-11-29 05:47:23,663 INFO machine: MachineCommand SEND: bookok
+2025-11-29 05:47:23,663 INFO machine: [MOCK] Sending command: bookok
+2025-11-29 05:47:24,163 INFO machine: MachineCommand RECV (mock): bookok -> book is ok
+2025-11-29 05:47:25,663 INFO machine: MachineCommand SEND: put1
+2025-11-29 05:47:25,663 INFO machine: [MOCK] Sending command: put1
+2025-11-29 05:47:26,164 INFO machine: MachineCommand RECV (mock): put1 -> been put1
+2025-11-29 05:48:08,019 INFO machine: Machine idle timeout, entering sleep mode (dep0)
+2025-11-29 05:48:08,019 INFO machine: MachineCommand SEND: dep0
+2025-11-29 05:48:08,019 INFO machine: [MOCK] Sending command: dep0
+2025-11-29 05:48:08,519 INFO machine: MachineCommand RECV (mock): dep0 -> device power off
+2025-11-29 05:48:29,982 WARNING machine: pyserial not found, forcing MOCK mode
+2025-11-29 05:48:29,983 WARNING machine: pyserial not found, forcing MOCK mode
+2025-11-29 05:48:31,983 INFO machine: MachineCommand SEND: dep1
+2025-11-29 05:48:31,983 INFO machine: [MOCK] Sending command: dep1
+2025-11-29 05:48:32,484 INFO machine: MachineCommand RECV (mock): dep1 -> device power on
+2025-11-29 05:48:34,484 INFO machine: MachineCommand SEND: homing
+2025-11-29 05:48:34,484 INFO machine: [MOCK] Sending command: homing
+2025-11-29 05:48:34,984 INFO machine: MachineCommand RECV (mock): homing -> ack
+2025-11-29 05:48:44,937 INFO machine: MachineCommand SEND: open
+2025-11-29 05:48:44,937 INFO machine: [MOCK] Sending command: open
+2025-11-29 05:48:45,438 INFO machine: MachineCommand RECV (mock): open -> opened
+2025-11-29 05:48:47,024 INFO machine: MachineCommand SEND: close
+2025-11-29 05:48:47,024 INFO machine: [MOCK] Sending command: close
+2025-11-29 05:48:47,524 INFO machine: MachineCommand RECV (mock): close -> closed
+2025-11-29 05:48:49,024 INFO machine: MachineCommand SEND: bookok
+2025-11-29 05:48:49,024 INFO machine: [MOCK] Sending command: bookok
+2025-11-29 05:48:49,525 INFO machine: MachineCommand RECV (mock): bookok -> book is ok
+2025-11-29 05:48:51,025 INFO machine: MachineCommand SEND: put1
+2025-11-29 05:48:51,025 INFO machine: [MOCK] Sending command: put1
+2025-11-29 05:48:51,525 INFO machine: MachineCommand RECV (mock): put1 -> been put1
+2025-11-29 05:49:51,476 WARNING machine: pyserial not found, forcing MOCK mode
+2025-11-29 05:49:51,477 WARNING machine: pyserial not found, forcing MOCK mode

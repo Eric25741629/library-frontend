@@ -7,10 +7,6 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
     <!-- 引入 Font Awesome -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-    <style>
-        .step-section { display: none; }
-        .step-section.active { display: block; }
-    </style>
 </head>
 <body>
     <!-- Service Suspended Overlay -->
@@ -26,7 +22,7 @@
     <!-- Loading Overlay (used when sending hardware control commands) -->
     <div id="loading-overlay" class="suspended-overlay" style="display:none; align-items:center; justify-content:center;">
         <div class="suspended-content">
-            <i class="fas fa-spinner fa-pulse" style="font-size:2rem;"></i>
+            <div class="spinner-border"></div>
             <h2>加載中，請稍等</h2>
             <p id="loading-message" style="margin-top:0.5rem;"></p>
         </div>
@@ -111,10 +107,48 @@
                         <div class="guide-machine">
                             <span class="machine-label">還書口內部</span>
                         </div>
-                        <div class="guide-book">
-                            <div class="book-body"></div>
-                            <div class="book-spine">書背</div>
-                            <i class="fas fa-arrow-up guide-arrow"></i>
+                        <div class="guide-book-3d-container">
+                            <!-- SVG 平放書本示意圖 (Top-down view) -->
+                            <svg width="260" height="260" viewBox="0 0 260 260" class="book-svg">
+                                <defs>
+                                    <filter id="flatShadow" x="-20%" y="-20%" width="140%" height="140%">
+                                        <feGaussianBlur in="SourceAlpha" stdDeviation="4"/>
+                                        <feOffset dx="0" dy="4" result="offsetblur"/>
+                                        <feComponentTransfer>
+                                            <feFuncA type="linear" slope="0.15"/>
+                                        </feComponentTransfer>
+                                        <feMerge>
+                                            <feMergeNode/>
+                                            <feMergeNode in="SourceGraphic"/>
+                                        </feMerge>
+                                    </filter>
+                                </defs>
+                                
+                                <!-- 指示箭頭 (位於書本上方，指示方向) -->
+                                <g class="guide-arrow-svg">
+                                    <path d="M130,10 L130,50 M130,10 L110,30 M130,10 L150,30" stroke="#007bff" stroke-width="8" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+                                </g>
+
+                                <!-- 書本主體 (平放) -->
+                                <g transform="translate(50, 60)" filter="url(#flatShadow)">
+                                    <!-- 書本輪廓 (包含書背與封面) -->
+                                    <rect x="0" y="0" width="160" height="180" rx="4" ry="4" fill="#ffffff" stroke="#ced4da" stroke-width="1"/>
+                                    
+                                    <!-- 書背區域 (Top Spine) -->
+                                    <path d="M1,4 L1,30 L159,30 L159,4 Q159,1 156,1 L4,1 Q1,1 1,4 Z" fill="#007bff"/>
+                                    
+                                    <!-- 書背文字 -->
+                                    <text x="80" y="22" font-family="Noto Sans TC, sans-serif" font-size="16" font-weight="bold" fill="white" text-anchor="middle" letter-spacing="2">書背</text>
+                                    
+                                    <!-- 封面裝飾 (模擬書本質感) -->
+                                    <rect x="20" y="50" width="120" height="10" rx="2" fill="#f1f3f5"/>
+                                    <rect x="20" y="70" width="80" height="6" rx="2" fill="#f1f3f5"/>
+                                    
+                                    <!-- 書本底部頁面效果 (Bottom Pages) -->
+                                    <path d="M4,180 L156,180 L152,188 L8,188 Z" fill="#e9ecef" stroke="#dee2e6" stroke-width="1"/>
+                                    <line x1="20" y1="183" x2="140" y2="183" stroke="#adb5bd" stroke-width="0.5"/>
+                                </g>
+                            </svg>
                         </div>
                         <div class="guide-user">
                             <span class="user-label">您的位置</span>
@@ -322,8 +356,8 @@
             
             document.getElementById('main-scan-box').classList.add('active');
 
-            statusText.textContent = '查詢書籍資料中...';
-            statusText.style.color = 'var(--primary-blue)';
+            // statusText.textContent = '查詢書籍資料中...'; // 不顯示查詢中，避免使用者誤會
+            // statusText.style.color = 'var(--primary-blue)';
 
             try {
                 const response = await fetch('/api/scan', {

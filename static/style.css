@@ -110,12 +110,14 @@ body {
 .main-container {
     flex: 1;
     display: flex;
-    justify-content: center;
+    /* justify-content: center; Removed to allow scrolling without top clipping */
     align-items: center;
     padding-top: 100px;
-    padding-bottom: 60px;
+    padding-bottom: 140px; /* Increased to prevent footer overlap */
     width: 100%;
     flex-direction: column; /* Ensure column layout */
+    overflow-y: auto; /* Allow vertical scrolling */
+    overflow-x: hidden;
 }
 
 .step-section {
@@ -127,7 +129,7 @@ body {
     width: 100%;
     max-width: 900px;
     padding: 2rem;
-    margin: 0 auto; /* Center horizontally */
+    margin: auto; /* Center vertically and horizontally in flex container */
     animation: fadeIn 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94) both;
 }
 
@@ -245,7 +247,7 @@ body {
     background: white;
     border-radius: var(--border-radius);
     padding: 0;
-    margin-bottom: 2.5rem;
+    margin: 0 auto 2.5rem; /* Centered horizontally */
     box-shadow: var(--card-shadow);
     overflow: hidden;
 }
@@ -299,7 +301,8 @@ body {
     flex-direction: column;
     gap: 15px;
     width: 100%;
-    max-width: 500px;
+    max-width: 700px;
+    margin: 0 auto;
 }
 
 /* Step 4: Success */
@@ -311,6 +314,7 @@ body {
     text-align: center;
     width: 100%;
     max-width: 700px;
+    /* margin: 0 auto; Removed to allow flex centering from parent */
 }
 
 .success-icon {
@@ -351,6 +355,7 @@ button {
     transition: all 0.2s cubic-bezier(0.25, 0.8, 0.25, 1);
     position: relative;
     overflow: hidden;
+    text-align: center;
 }
 
 button:active {
@@ -421,6 +426,12 @@ button:active {
     padding: 18px;
     font-size: 1.3rem;
     font-weight: 600;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 10px;
+    text-align: center;
+    border-radius: var(--border-radius); /* Match card radius for better alignment perception */
 }
 
 .action-buttons {
@@ -445,6 +456,7 @@ button:active {
     font-size: 0.9rem;
     color: var(--text-light);
     border-top: 1px solid rgba(0,0,0,0.05);
+    z-index: 1000;
 }
 
 .system-status {
@@ -495,9 +507,9 @@ button:active {
 
 .place-book-anim-container {
     position: relative;
-    width: 250px;
-    height: 280px;
-    margin: 2rem auto 3rem;
+    width: 100%;
+    min-height: 280px;
+    margin: 2rem 0 3rem;
     display: flex;
     justify-content: center;
     align-items: flex-end;
@@ -667,44 +679,46 @@ button:active {
     border-top: 10px solid #343a40;
 }
 
-.guide-book {
-    width: 140px;
-    height: 180px;
-    border: 3px solid #007bff;
-    background-color: white;
-    position: relative;
-    border-radius: 4px;
-    box-shadow: 0 4px 8px rgba(0,0,0,0.1);
-    display: flex;
-    flex-direction: column;
-}
-
-.book-spine {
-    height: 30px;
-    background-color: #007bff;
-    color: white;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-weight: bold;
+/* SVG Book Guide */
+.guide-book-3d-container {
     width: 100%;
-    margin-top: auto; /* 將書背推到底部 */
+    height: 260px;
+    position: relative;
+    margin: 10px auto;
+    display: flex;
+    justify-content: center;
+    align-items: center;
 }
 
-.guide-arrow {
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    font-size: 3rem;
-    color: rgba(0, 123, 255, 0.2);
-    animation: moveUp 1.5s infinite ease-out;
+.book-svg {
+    max-width: 100%;
+    height: auto;
+    overflow: visible; /* Allow arrow animation to go outside slightly */
 }
 
-@keyframes moveUp {
-    0% { transform: translate(-50%, 0); opacity: 0; }
-    50% { opacity: 1; }
-    100% { transform: translate(-50%, -40px); opacity: 0; }
+.guide-arrow-svg {
+    animation: bounceArrowSVG 1.5s infinite ease-in-out;
+}
+
+@keyframes bounceArrowSVG {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-15px); }
+}
+
+/* Spinner Animation */
+.spinner-border {
+    width: 4rem;
+    height: 4rem;
+    border: 0.3em solid rgba(0, 123, 255, 0.2);
+    border-right-color: var(--primary-blue);
+    border-radius: 50%;
+    animation: spinner-border .8s linear infinite;
+    margin-bottom: 1.5rem;
+    display: inline-block;
+}
+
+@keyframes spinner-border {
+    100% { transform: rotate(360deg); }
 }
 
 .guide-user {

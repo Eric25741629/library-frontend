@@ -422,27 +422,68 @@ def return_book():
 
 @app.route('/api/admin/logs', methods=['GET'])
 def get_logs():
-    """獲取還書箱內的書籍清單"""
+    """獲取還書箱內的書籍清單（box_inventory）與今日統計數據"""
     if REQUIRE_ADMIN_LOGIN and not session.get('logged_in'):
         return jsonify({"error": "Unauthorized"}), 401
         
     conn = get_box_db()
+    data = {"logs": [], "history_logs": [], "today_total": 0}
+    
     try:
+        # 1. 獲取還書箱內的書籍（未清空前）
         logs = conn.execute('SELECT * FROM box_inventory ORDER BY id DESC').fetchall()
-    except:
-        logs = []
+        data["logs"] = [dict(row) for row in logs]
+
+        # 1.5 獲取歷史紀錄 (若表存在)
+        table_check = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='box_history'").fetchone()
+        if table_check:
+             history = conn.execute('SELECT * FROM box_history ORDER BY id DESC LIMIT 50').fetchall() # 限制 50 筆避免過多
+             data["history_logs"] = [dict(row) for row in history]
+        
+        # 2. 獲取今日還書總數（包含 box_inventory 和 box_history 中今日的紀錄）
+        # 取得 box_inventory 中今日的數量
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        
+        # 檢查 box_history 表是否存在
+        table_check = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='box_history'").fetchone()
+        
+        count_inventory = conn.execute("SELECT COUNT(*) FROM box_inventory WHERE return_time LIKE ?", (f"{today_str}%",)).fetchone()[0]
+        
+        count_history = 0
+        if table_check:
+             count_history = conn.execute("SELECT COUNT(*) FROM box_history WHERE return_time LIKE ?", (f"{today_str}%",)).fetchone()[0]
+             
+        data["today_total"] = count_inventory + count_history
+        
+    except Exception as e:
+        logger.error(f"get_logs error: {e}")
     finally:
         conn.close()
-    return jsonify([dict(row) for row in logs])
+    return jsonify(data)
 
 @app.route('/api/admin/clear_logs', methods=['POST'])
 def clear_logs():
-    """(向後相容) 清空還書箱 — 保留原有路由，行為為刪除 box_inventory"""
+    """(向後相容) 清空還書箱 — 保留原有路由，行為為移至歷史紀錄並清空箱內計數"""
     if REQUIRE_ADMIN_LOGIN and not session.get('logged_in'):
         return jsonify({"success": False, "message": "未登入"}), 401
 
     conn = get_box_db()
     try:
+        # 建立 box_history 如果不存在
+        conn.execute('''CREATE TABLE IF NOT EXISTS box_history
+                     (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                      book_id TEXT,
+                      title TEXT,
+                      image_url TEXT,
+                      return_time TEXT,
+                      clear_time TEXT)''')
+                      
+        # 將 box_inventory 資料搬移到 box_history
+        current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        conn.execute('''INSERT INTO box_history (book_id, title, image_url, return_time, clear_time)
+                        SELECT book_id, title, image_url, return_time, ? FROM box_inventory''', (current_time,))
+        
+        # 清空 box_inventory
         conn.execute('DELETE FROM box_inventory')
         conn.commit()
     except Exception as e:
@@ -455,13 +496,36 @@ def clear_logs():
 
 @app.route('/api/admin/clear_box', methods=['POST'])
 def clear_box():
-    """清空還書箱內容物 (管理員取走實體書籍)"""
+    """清空還書箱內容物 (管理員取走實體書籍) - 僅重置箱內書本計數，不刪除歷史紀錄"""
     if REQUIRE_ADMIN_LOGIN and not session.get('logged_in'):
         return jsonify({"success": False, "message": "未登入"}), 401
 
     conn = get_box_db()
     try:
+        # 修改：不再刪除 box_inventory，而是應該有一個欄位或標記表示已取出
+        # 但依目前簡單設計 box_inventory 即代表箱內物品。
+        # 為了滿足「不刪除紀錄」但又要「清空計數 0/20」，我們需要將這些記錄標記為 'archived' 或移至歷史表
+        
+        # 方案 A: 增加 status 欄位 (需要修改 schema，比較麻煩)
+        # 方案 B: 將資料搬移到 box_history 表 (如果沒有就建一個)，然後清空 box_inventory
+        
+        # 1. 建立 box_history 如果不存在
+        conn.execute('''CREATE TABLE IF NOT EXISTS box_history
+                     (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                      book_id TEXT,
+                      title TEXT,
+                      image_url TEXT,
+                      return_time TEXT,
+                      clear_time TEXT)''')
+                      
+        # 2. 將 box_inventory 資料搬移到 box_history
+        current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        conn.execute('''INSERT INTO box_history (book_id, title, image_url, return_time, clear_time)
+                        SELECT book_id, title, image_url, return_time, ? FROM box_inventory''', (current_time,))
+        
+        # 3. 清空 box_inventory (這樣計數就會變回 0)
         conn.execute('DELETE FROM box_inventory')
+        
         conn.commit()
     except Exception as e:
         print(f"Clear box error: {e}")
@@ -473,20 +537,30 @@ def clear_box():
 
 @app.route('/api/admin/clear_history', methods=['POST'])
 def clear_history():
-    """清空還書紀錄（目前與清空箱內資料等同，未來可拓展為清空歷史表）"""
+    """清空歷史還書紀錄（僅清除歷史紀錄，不影響箱內目前的記錄）"""
     if REQUIRE_ADMIN_LOGIN and not session.get('logged_in'):
         return jsonify({"success": False, "message": "未登入"}), 401
 
     conn = get_box_db()
     try:
-        conn.execute('DELETE FROM box_inventory')
+        # 確保 box_history 存在（如不存在則建立）
+        conn.execute('''CREATE TABLE IF NOT EXISTS box_history
+                     (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                      book_id TEXT,
+                      title TEXT,
+                      image_url TEXT,
+                      return_time TEXT,
+                      clear_time TEXT)''')
+
+        # 清空歷史紀錄（不刪除 box_inventory，保留箱內資料）
+        conn.execute('DELETE FROM box_history')
         conn.commit()
     except Exception as e:
         print(f"Clear history error: {e}")
         return jsonify({"success": False, "message": "清空失敗"}), 500
     finally:
         conn.close()
-    return jsonify({"success": True, "message": "還書紀錄已清空"})
+    return jsonify({"success": True, "message": "歷史紀錄已清空"})
 
 
 @app.route('/api/admin/set_limit', methods=['POST'])

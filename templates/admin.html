@@ -218,11 +218,20 @@
             height: fit-content;
         }
 
+        /* 修正 .card-header 對齊 */
         .card-header {
             display: flex;
             justify-content: space-between;
             align-items: center;
             margin-bottom: 24px;
+        }
+
+        /* 修正 .header 對齊，確保標題和按鈕群組垂直置中 */
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
         }
 
         .card-title {
@@ -454,7 +463,15 @@
             <!-- Table -->
             <div class="card">
                 <div class="card-header">
-                    <h2 class="card-title">最近還書紀錄</h2>
+                    <h2 class="card-title" id="table-title">當前箱內列表</h2>
+                    <div style="display: flex; gap: 10px;">
+                        <button class="btn btn-primary" id="btn-current-list" onclick="switchList('current')" style="padding: 6px 12px; font-size: 13px;">
+                            <i class="fas fa-box-open"></i> 當前列表
+                        </button>
+                        <button class="btn btn-secondary" id="btn-history-list" onclick="switchList('history')" style="padding: 6px 12px; font-size: 13px; background: #e0e5f2; color: #5f6c7b;">
+                            <i class="fas fa-history"></i> 歷史列表
+                        </button>
+                    </div>
                 </div>
                 <div class="table-container">
                     <table id="logs-table">
@@ -464,7 +481,7 @@
                                 <th>書籍資訊</th>
                                 <th>書籍編號</th>
                                 <th>還書時間</th>
-                                <th>狀態</th>
+                                <th id="header-status-or-clear-time">狀態</th>
                             </tr>
                         </thead>
                         <tbody id="logs-body">
@@ -473,7 +490,7 @@
                     </table>
                     <div id="empty-message" class="empty-state" style="display: none;">
                         <i class="fas fa-inbox" style="font-size: 48px; margin-bottom: 16px; opacity: 0.3;"></i>
-                        <p>目前尚無還書紀錄</p>
+                        <p>目前尚無紀錄</p>
                     </div>
                 </div>
             </div>
@@ -600,12 +617,52 @@
         }
 
         // Initialization
+        let currentViewMode = 'current'; // 'current' or 'history'
+        let cachedData = null;
+
         document.addEventListener('DOMContentLoaded', () => {
             fetchLogs();
             fetchStatus();
             fetchUART();
             resetIdleTimer();
         });
+
+        function switchList(mode) {
+            currentViewMode = mode;
+            
+            // Update buttons
+            const btnCurrent = document.getElementById('btn-current-list');
+            const btnHistory = document.getElementById('btn-history-list');
+            const title = document.getElementById('table-title');
+            
+            if(mode === 'current') {
+                btnCurrent.classList.add('btn-primary');
+                btnCurrent.classList.remove('btn-secondary');
+                btnCurrent.style.background = ''; // reset inline style
+                btnCurrent.style.color = '';
+                
+                btnHistory.classList.remove('btn-primary');
+                btnHistory.classList.add('btn-secondary');
+                btnHistory.style.background = '#e0e5f2';
+                btnHistory.style.color = '#5f6c7b';
+                
+                title.textContent = '當前箱內列表';
+            } else {
+                btnHistory.classList.add('btn-primary');
+                btnHistory.classList.remove('btn-secondary');
+                btnHistory.style.background = '';
+                btnHistory.style.color = '';
+
+                btnCurrent.classList.remove('btn-primary');
+                btnCurrent.classList.add('btn-secondary');
+                btnCurrent.style.background = '#e0e5f2';
+                btnCurrent.style.color = '#5f6c7b';
+                
+                title.textContent = '歷史還書列表';
+            }
+            
+            if(cachedData) renderLogs(cachedData);
+        }
 
         // Auto Logout
         let idleTimer;
@@ -658,29 +715,75 @@
             } catch (error) { console.error(error); }
         }
 
-        function renderLogs(logs) {
+        function renderLogs(data) {
+            cachedData = data;
+            
+            // Backwards compatibility check
+            let currentLogs = [];
+            let historyLogs = [];
+            
+            if (Array.isArray(data)) {
+                // If data is just array, assume old format (current logs only)
+                currentLogs = data;
+            } else {
+                currentLogs = data.logs || [];
+                historyLogs = data.history_logs || [];
+            }
+            
+            // Decide which list to show
+            const displayLogs = currentViewMode === 'current' ? currentLogs : historyLogs;
+
             const tbody = document.getElementById('logs-body');
             const emptyMsg = document.getElementById('empty-message');
             const totalCount = document.getElementById('total-count');
             const todayTotal = document.getElementById('today-total');
             
             tbody.innerHTML = '';
-            totalCount.textContent = logs.length;
             
-            // Calculate today's total (simple check)
-            const todayStr = new Date().toISOString().split('T')[0];
-            const todayCount = logs.filter(l => l.return_time.startsWith(todayStr)).length;
-            todayTotal.textContent = todayCount;
+            // Stats always reflect CURRENT BOX count
+            if (totalCount) totalCount.textContent = currentLogs.length;
+            
+            if (todayTotal) {
+                if (data.today_total !== undefined) {
+                    todayTotal.textContent = data.today_total;
+                } else {
+                    // Fallback calculation from logs if server doesn't provide it
+                    const todayStr = new Date().toISOString().split('T')[0];
+                    const todayCount = currentLogs.filter(l => l.return_time.startsWith(todayStr)).length;
+                    todayTotal.textContent = todayCount;
+                }
+            }
 
-            if (logs.length === 0) {
+            if (displayLogs.length === 0) {
                 emptyMsg.style.display = 'block';
-                return;
+                emptyMsg.querySelector('p').textContent = currentViewMode === 'current' ? '目前箱內無書籍' : '尚無歷史紀錄';
             } else {
                 emptyMsg.style.display = 'none';
             }
 
-            logs.forEach(log => {
+            // Update table header based on mode
+            const statusHeader = document.getElementById('header-status-or-clear-time');
+            if (currentViewMode === 'history') {
+                statusHeader.textContent = '取出時間';
+            } else {
+                statusHeader.textContent = '狀態';
+            }
+
+            displayLogs.forEach(log => {
                 const tr = document.createElement('tr');
+                
+                let lastColumnContent = '';
+                if (currentViewMode === 'current') {
+                    lastColumnContent = '<span class="status-badge">已入箱</span>';
+                } else {
+                    // For history, show clear_time if available, else show badge
+                    if (log.clear_time) {
+                        lastColumnContent = `<span style="color:var(--text-secondary); font-size:13px;">${log.clear_time}</span>`;
+                    } else {
+                        lastColumnContent = '<span class="status-badge" style="background:rgba(163, 174, 208, 0.1); color:#a3aed0;">已取出</span>';
+                    }
+                }
+
                 tr.innerHTML = `
                     <td>#${log.id}</td>
                     <td style="display:flex; align-items:center; gap:12px;">
@@ -689,7 +792,7 @@
                     </td>
                     <td><span style="font-family:monospace; background:#f4f7f6; padding:4px 8px; border-radius:6px;">${log.book_id}</span></td>
                     <td>${log.return_time}</td>
-                    <td><span class="status-badge">已入箱</span></td>
+                    <td>${lastColumnContent}</td>
                 `;
                 tbody.appendChild(tr);
             });
