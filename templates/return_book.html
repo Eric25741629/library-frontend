@@ -7,6 +7,10 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
     <!-- 引入 Font Awesome -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        .step-section { display: none; }
+        .step-section.active { display: block; }
+    </style>
 </head>
 <body>
     <!-- Service Suspended Overlay -->
@@ -37,10 +41,7 @@
             <h1>國立雲林科技大學圖書館</h1>
         </div>
         <div class="header-right">
-            <div class="logo-placeholder">
-                <i class="fas fa-university"></i> YunTech 國立雲林科技大學
-                <span class="sub-text">National Yunlin University of Science & Technology</span>
-            </div>
+            <img src="{{ url_for('static', filename='logo.png') }}" alt="YunTech Logo" style="height: 80px;">
         </div>
     </header>
 
@@ -52,7 +53,11 @@
             <div class="welcome-content">
                 <h2 class="welcome-title">智慧還書，流暢體驗</h2>
                 <p class="welcome-subtitle">歡迎使用國立雲林科技大學圖書館自助還書服務</p>
-                <button class="btn-primary btn-large" onclick="nextStep('step-scan')">開始還書</button>
+                <div class="action-buttons">
+                    <button class="btn-primary btn-large" onclick="nextStep('step-scan')">
+                        <i class="fas fa-book-reader"></i> 開始還書
+                    </button>
+                </div>
             </div>
         </section>
 
@@ -61,8 +66,8 @@
             <h2 class="section-title">請將書本條碼放入掃描區</h2>
             
             <div class="scan-area-container">
-                <div class="scan-box">
-                    <i class="fas fa-barcode" style="font-size: 8rem; color: #e9ecef;"></i>
+                <div class="scan-box" id="main-scan-box">
+                    <i class="fas fa-barcode" style="font-size: 10rem; color: #d1d9e6;"></i>
                 </div>
             </div>
             
@@ -101,8 +106,80 @@
             
             <div class="place-book-instruction">
                 <div class="place-book-anim-container">
+                    <!-- 書背朝向機器示意圖 -->
+                    <div class="book-spine-guide">
+                        <div class="guide-machine">
+                            <span class="machine-label">還書口內部</span>
+                        </div>
+                        <div class="guide-book">
+                            <div class="book-body"></div>
+                            <div class="book-spine">書背</div>
+                            <i class="fas fa-arrow-up guide-arrow"></i>
+                        </div>
+                        <div class="guide-user">
+                            <span class="user-label">您的位置</span>
+                        </div>
+                    </div>
+                </div>
+                <p style="font-size: 1.5rem; color: #555; margin-bottom: 1rem;">請確認書籍已放入</p>
+                <p style="font-size: 1.3rem; color: #c0392b; margin-bottom: 3rem; font-weight: bold;">
+                    請以書背朝向機器的方向投入
+                </p>
+            </div>
+
+            <div class="action-buttons">
+                <button class="btn-primary btn-large btn-pulse" onclick="finalizeReturn()">
+                    <i class="fas fa-check"></i> 完成投入
+                </button>
+            </div>
+        </section>
+
+        <!-- Step 3.6: Attachment Prompt -->
+        <section id="step-attachment-prompt" class="step-section">
+            <h2 class="section-title">此書籍含有附件</h2>
+            <div class="place-book-instruction">
+                 <div class="place-book-anim-container">
+                    <div class="anim-book" style="color: #ffc107;">
+                        <i class="fas fa-compact-disc"></i>
+                    </div>
+                </div>
+                <p style="font-size: 1.5rem; color: #555; margin-bottom: 1rem;">
+                    請先投入<strong style="color:#007bff;">書籍本體</strong>
+                </p>
+                <p style="font-size: 1.1rem; color: #666; margin-bottom: 2rem;">
+                    待機器閘門重新開啟後，再投入附件 (光碟/小冊子)
+                </p>
+            </div>
+            
+            <div class="action-buttons">
+                <button class="btn-primary btn-large" onclick="processBookWithAttachment()">
+                    <i class="fas fa-check"></i> 我知道了，先投入書籍
+                </button>
+            </div>
+        </section>
+
+        <!-- Step 3.65: Scan Attachment -->
+        <section id="step-scan-attachment" class="step-section">
+            <h2 class="section-title">請掃描附件上的條碼</h2>
+            
+            <div class="scan-area-container">
+                <div class="scan-box" style="border-color: #ffc107;" id="attachment-scan-box">
+                    <i class="fas fa-barcode" style="font-size: 10rem; color: #d1d9e6;"></i>
+                </div>
+            </div>
+            
+            <p class="scan-status" id="scan-attachment-status-text">請掃描附件上的條碼進行核對</p>
+
+            <input type="text" id="attachment-barcode-input" class="barcode-input-field" placeholder="掃描附件條碼..." autocomplete="off">
+        </section>
+
+        <!-- Step 3.7: Insert Attachment Instruction -->
+        <section id="step-insert-attachment" class="step-section">
+             <h2 class="section-title">請投入附件</h2>
+             <div class="place-book-instruction">
+                <div class="place-book-anim-container">
                     <div class="anim-book">
-                        <i class="fas fa-book"></i>
+                        <i class="fas fa-compact-disc"></i>
                     </div>
                     <div class="anim-arrow">
                         <i class="fas fa-arrow-down"></i>
@@ -111,12 +188,14 @@
                         <i class="fas fa-box-open"></i>
                     </div>
                 </div>
-                <p style="font-size: 1.5rem; color: #555; margin-bottom: 3rem;">請確認所有書籍皆已放入還書口</p>
+                <p style="font-size: 1.5rem; color: #555; margin-bottom: 1rem;">
+                    請將附件投入還書口
+                </p>
             </div>
 
             <div class="action-buttons">
-                <button class="btn-primary btn-large btn-pulse" onclick="finalizeReturn()">
-                    <i class="fas fa-check"></i> 完成投入
+                <button class="btn-primary btn-large btn-pulse" onclick="finalizeAttachmentReturn()">
+                    <i class="fas fa-check"></i> 完成附件投入
                 </button>
             </div>
         </section>
@@ -162,6 +241,8 @@
 
     <script>
         let scannedBooks = [];
+        let currentProcessingBook = null; // 當前正在處理含附件的書籍
+        let currentAttachmentBarcode = null; // 已掃描的附件條碼（送至後端驗證）
         
         // 更新時間
         function updateTime() {
@@ -186,6 +267,13 @@
                 const input = document.getElementById('barcode-input');
                 input.value = '';
                 input.focus();
+                document.getElementById('main-scan-box').classList.add('active');
+            } else if (stepId === 'step-scan-attachment') {
+                const input = document.getElementById('attachment-barcode-input');
+                if(input) {
+                    input.value = '';
+                    setTimeout(() => input.focus(), 100);
+                }
             }
         }
 
@@ -210,6 +298,7 @@
             clearInterval(countdownInterval);
 
             scannedBooks = [];
+            currentProcessingBook = null;
             updateBookList();
             nextStep('step-welcome');
         }
@@ -230,9 +319,11 @@
                 }, 2000);
                 return;
             }
+            
+            document.getElementById('main-scan-box').classList.add('active');
 
             statusText.textContent = '查詢書籍資料中...';
-            statusText.style.color = '#007bff';
+            statusText.style.color = 'var(--primary-blue)';
 
             try {
                 const response = await fetch('/api/scan', {
@@ -245,7 +336,13 @@
                 if (result.success) {
                     scannedBooks.push(result.data);
                     updateBookList();
-                    nextStep('step-confirm');
+                    // 檢查是否有附件
+                    if (result.data.has_attachment) {
+                        currentProcessingBook = result.data;
+                        nextStep('step-attachment-prompt');
+                    } else {
+                        nextStep('step-confirm');
+                    }
                 } else {
                     // 處理逾期錯誤
                     if (result.code === 'OVERDUE') {
@@ -272,8 +369,9 @@
                     // 3秒後重置狀態
                     setTimeout(() => {
                         statusText.textContent = '系統就緒，請掃描書籍條碼';
-                        statusText.style.color = '#666';
+                        statusText.style.color = 'var(--text-light)';
                     }, 3000);
+                    document.getElementById('main-scan-box').classList.remove('active');
                 }
             } catch (e) {
                 console.error(e);
@@ -284,17 +382,33 @@
 
         // 監聽真實掃描槍輸入 (或鍵盤)
         const barcodeInput = document.getElementById('barcode-input');
-        barcodeInput.addEventListener('keypress', function(e) {
-            if (e.key === 'Enter') {
-                handleScan(this.value.trim());
-                this.value = '';
-            }
-        });
+        if (barcodeInput) {
+            barcodeInput.addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') {
+                    handleScan(this.value.trim());
+                    this.value = '';
+                }
+            });
+        }
+
+        const attachmentBarcodeInput = document.getElementById('attachment-barcode-input');
+        if (attachmentBarcodeInput) {
+            attachmentBarcodeInput.addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') {
+                    handleAttachmentScan(this.value.trim());
+                    this.value = '';
+                }
+            });
+        }
 
         // 保持焦點在隱藏輸入框 (當在掃描頁面時)
         document.addEventListener('click', function() {
             if (document.getElementById('step-scan').classList.contains('active')) {
                 document.getElementById('barcode-input').focus();
+            }
+            if (document.getElementById('step-scan-attachment') && document.getElementById('step-scan-attachment').classList.contains('active')) {
+                const input = document.getElementById('attachment-barcode-input');
+                if(input) input.focus();
             }
         });
 
@@ -353,7 +467,7 @@
             }, 5000);
         }
 
-        // 確認還書 (最終步驟)
+        // 確認還書 (最終步驟 - 一般書籍)
         async function finalizeReturn() {
             if (scannedBooks.length === 0) return;
     
@@ -374,13 +488,181 @@
                     startAutoRedirect();
                 } else {
                     hideLoading();
-                    alert(result.message || '還書失敗');
+                    // 如果是書籍未放入的錯誤，後端已重開門，前端需提示使用者
+                    if (result.code === 'BOOK_NOT_DETECTED') {
+                        alert(result.message + "\n\n(投書口已重新開啟，請重新放入)");
+                        // 停留在原步驟，不跳轉，讓使用者可以再次點擊「完成投入」
+                    } else {
+                        alert(result.message || '還書失敗');
+                    }
                 }
             } catch (e) {
                 hideLoading();
                 console.error(e);
                 alert('系統錯誤');
             }
+        }
+
+        // --- 附件處理流程 ---
+
+        // 1. 使用者確認先投書 -> 開門 -> 進入投書畫面 (這裡復用 goToPlaceBookStep 邏輯，但要改一下下一步)
+        async function processBookWithAttachment() {
+             showLoading('正在開啟投書口 (書籍)，請稍候…');
+             try {
+                const res = await fetch('/api/hardware/open', { method: 'POST' });
+                const result = await res.json();
+                if (res.ok && result.success) {
+                    hideLoading();
+                    // 這裡暫時顯示通用的投書畫面，但按鈕行為要變
+                    nextStep('step-place-book');
+                    // 修改按鈕行為，使其觸發 "書籍已投，準備投附件"
+                    const btn = document.querySelector('#step-place-book button');
+                    if(btn) {
+                        btn.onclick = finishBookAndStartAttachment;
+                        btn.innerHTML = '<i class="fas fa-arrow-right"></i> 完成書籍投入，下一步';
+                    }
+                } else {
+                    hideLoading();
+                    alert(result.message || '開啟投書口失敗');
+                }
+            } catch (e) {
+                hideLoading();
+                alert('系統錯誤');
+            }
+        }
+
+        // 2. 書籍投入完成 -> 關門確認 -> 進入附件掃描 -> 驗證 -> 再開門 -> 提示投附件
+        async function finishBookAndStartAttachment() {
+            if(!currentProcessingBook) return;
+            showLoading('正在處理書籍，準備接收附件…');
+            
+            try {
+                // 先呼叫 return API 歸還本體
+                const response = await fetch('/api/return', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ book_ids: [currentProcessingBook.book_id] })
+                });
+                const result = await response.json();
+                
+                if(!result.success) {
+                    hideLoading();
+                    alert(result.message || '書籍歸還失敗');
+                    resetFlow();
+                    return;
+                }
+
+                // 書籍歸還成功 (門已關，且已 checkin)
+                hideLoading();
+                
+                // 重置附件條碼暫存
+                currentAttachmentBarcode = null;
+
+                // 進入附件掃描核對步驟
+                nextStep('step-scan-attachment');
+
+            } catch (e) {
+                hideLoading();
+                alert('系統錯誤');
+            }
+        }
+
+        // 2.5 處理附件掃描核對
+        async function handleAttachmentScan(barcode) {
+             if (!barcode) return;
+             if (!currentProcessingBook) return;
+
+             const statusText = document.getElementById('scan-attachment-status-text');
+             
+             // 簡單核對：掃描的條碼必須與書籍條碼一致
+             if (barcode.trim().toUpperCase() === currentProcessingBook.book_id.trim().toUpperCase()) {
+                 statusText.textContent = '條碼核對成功！準備開啟投書口...';
+                 statusText.style.color = '#2ecc71';
+                 
+                 // 記錄掃描的附件條碼供後端驗證
+                 currentAttachmentBarcode = barcode.trim();
+
+                 // 核對成功，開啟投書口
+                 await startAttachmentInsertion();
+             } else {
+                 statusText.textContent = '條碼不符！請掃描正確的附件條碼';
+                 statusText.style.color = '#dc3545';
+                 // 清空輸入框
+                 const input = document.getElementById('attachment-barcode-input');
+                 if(input) input.value = '';
+                 
+                 setTimeout(() => {
+                     statusText.textContent = '請掃描附件上的條碼進行核對';
+                     statusText.style.color = 'var(--text-light)';
+                 }, 3000);
+             }
+        }
+
+        // 2.6 開啟投書口供附件投入
+        async function startAttachmentInsertion() {
+             showLoading('正在開啟投書口 (附件)，請稍候…');
+             
+             // 稍微延遲讓使用者看到成功訊息
+             setTimeout(async () => {
+                 try {
+                     const res = await fetch('/api/hardware/open', { method: 'POST' });
+                     const result = await res.json();
+                     if (res.ok && result.success) {
+                        hideLoading();
+                        nextStep('step-insert-attachment');
+                     } else {
+                        hideLoading();
+                        alert(result.message || '開啟投書口失敗');
+                        // 即使失敗，也許應該允許重試或結束
+                        alert('無法開啟投書口接收附件，請洽櫃台');
+                        nextStep('step-success');
+                     }
+                 } catch (e) {
+                    hideLoading();
+                    alert('系統錯誤');
+                 }
+             }, 1000);
+        }
+
+        // 3. 附件投入完成 -> 關門 -> 結束
+        async function finalizeAttachmentReturn() {
+             if(!currentProcessingBook) return;
+             if(!currentAttachmentBarcode) {
+                 alert('尚未掃描附件條碼，請先掃描以便核對');
+                 return;
+             }
+             showLoading('正在處理附件，請稍候…');
+
+             try {
+                // 再次呼叫 return API，但標記為附件 (後端僅記錄或再次 checkin)
+                const response = await fetch('/api/return', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        book_ids: [currentProcessingBook.book_id],
+                        attachment_only: true,
+                        attachment_barcode: currentAttachmentBarcode
+                    })
+                });
+                const result = await response.json();
+
+                if(result.success) {
+                    hideLoading();
+                    // 清除暫存
+                    currentAttachmentBarcode = null;
+                    currentProcessingBook = null;
+                    nextStep('step-success');
+                    startAutoRedirect();
+                } else {
+                    hideLoading();
+                    alert(result.message || '附件處理異常，但書籍已歸還。');
+                    nextStep('step-success');
+                }
+             } catch(e) {
+                 hideLoading();
+                 alert('系統錯誤');
+                 nextStep('step-success');
+             }
         }
 
         // 定期檢查系統狀態（包含圖書館與機器通訊）

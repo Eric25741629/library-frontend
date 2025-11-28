@@ -93,7 +93,8 @@ class SIP2Client:
             "author": "Unknown Author",
             "status": "Unknown",
             "due_date": None,
-            "patron_name": None
+            "patron_name": None,
+            "has_attachment": False # Default to False
         }
         
         parts = resp.split('|')
@@ -102,6 +103,8 @@ class SIP2Client:
             elif part.startswith('AA'): data['author'] = part[2:]
             elif part.startswith('AH'): data['due_date'] = part[2:].strip() # Due Date
             elif part.startswith('AE'): data['patron_name'] = part[2:] # Patron Name
+            # Example field for attachment - adjust based on actual SIP2 field (e.g. BQ or CK)
+            # elif part.startswith('BQ'): data['has_attachment'] = 'attachment' in part[2:].lower()
         
         return data
 
@@ -139,16 +142,30 @@ class MockSIP2Client:
                 "author": "測試作者",
                 "status": "Checked Out",
                 "due_date": (datetime.datetime.now() - datetime.timedelta(days=5)).strftime("%Y-%m-%d"),
-                "patron_name": "測試借閱者"
+                "patron_name": "測試借閱者",
+                "has_attachment": False
             }
-            
+        
+        # 模擬有附件的書籍 (barcode 包含 'attach')
+        if "attach" in barcode:
+             return {
+                "barcode": barcode,
+                "title": f"SIP2含附件書籍-{barcode}",
+                "author": "測試作者",
+                "status": "Checked Out",
+                "due_date": (datetime.datetime.now() + datetime.timedelta(days=7)).strftime("%Y-%m-%d"),
+                "patron_name": "測試借閱者",
+                "has_attachment": True
+            }
+
         return {
             "barcode": barcode,
             "title": f"SIP2測試書籍-{barcode}",
             "author": "測試作者",
             "status": "Checked Out",
             "due_date": (datetime.datetime.now() + datetime.timedelta(days=7)).strftime("%Y-%m-%d"),
-            "patron_name": "測試借閱者"
+            "patron_name": "測試借閱者",
+            "has_attachment": False
         }
 
     def checkin_book(self, barcode):

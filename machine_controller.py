@@ -84,7 +84,8 @@ class MachineController:
             # 更新最後動作時間 (除了查詢狀態指令外)
             if cmd not in ["state"] and not cmd.startswith("op"):
                 self.last_action_time = time.time()
-                if self.is_sleeping and cmd != "dep1":
+                # 在 mock mode 下不需要 wake_up 邏輯，避免遞迴呼叫
+                if not self.mock_mode and self.is_sleeping and cmd != "dep1":
                     self.wake_up()
      
             # 記錄要發送的指令
@@ -158,6 +159,7 @@ class MachineController:
         if cmd == "dep1": return "device power on"
         if cmd == "dep0": return "device power off"
         if cmd == "open": return "opened"
+        if cmd == "reopen": return "opened"
         if cmd == "close": return "closed"
         if cmd == "put1": return "been put1"
         if cmd == "put2": return "been put2"
@@ -192,14 +194,45 @@ class MachineController:
             self.is_sleeping = True
 
     def open_door(self):
-        """開啟投書口"""
+        """開啟投書口 (智慧判斷狀態)"""
         resp = self._send_command("open")
+        
+        # 若成功開啟
+        if "opened" in resp:
+            return True
+            
+        # 若已在開啟狀態 (State 3)，視為成功
+        if "error state 3" in resp:
+            return True
+            
+        # 若處於等待確認狀態 (State 4)，則應使用 reopen
+        if "error state 4" in resp:
+            self.logger.info("Machine in state 4, switching to 'reopen' command")
+            return self.reopen_door()
+            
+        return False
+
+    def reopen_door(self):
+        """重新開啟投書口 (用於書籍未放妥時)"""
+        resp = self._send_command("reopen")
+        # 若已在開啟狀態 (State 3)，視為成功
+        if "error state 3" in resp:
+            return True
         return "opened" in resp
 
     def close_door(self):
         """關閉投書口"""
         resp = self._send_command("close")
-        return "closed" in resp
+        
+        # 若成功關閉
+        if "closed" in resp:
+            return True
+            
+        # 若已在關閉狀態 (State 4)，視為成功
+        if "error state 4" in resp:
+            return True
+            
+        return False
 
     def check_book_status(self):
         """檢查書籍是否放妥 (bookok)"""

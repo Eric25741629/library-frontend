@@ -65,7 +65,7 @@ logger = logging.getLogger(__name__)
 
 # 引入控制器
 import threading
-from machine_controller import machine
+from machine_controller import MachineController
 from sip2_client import SIP2Client, MockSIP2Client
 
 # 設定 Logging
@@ -83,9 +83,12 @@ REQUIRE_ADMIN_LOGIN = cfg.get('require_admin_login', False)
 # 還書箱上限（可由管理介面變更）
 MAX_RETURN_LIMIT = int(cfg.get('max_return_limit', 20))
 
-# 初始化機器
-# 不強制 mock：改由 config.yml 的 'mock_mode' 控制（預設為 False）
-machine.mock_mode = bool(cfg.get('mock_mode', False))
+# 初始化機器：以 config.yml 的設定建立新的 MachineController 實例
+# 優先使用 cfg['machine'].get('mock_mode')，向後相容 top-level cfg['mock_mode']
+machine_cfg = cfg.get('machine', {})
+mock_mode = bool(machine_cfg.get('mock_mode', cfg.get('mock_mode', False)))
+# 建立實例（MachineController 內部會在沒有 pyserial 時自動 fallback 為 mock）
+machine = MachineController(mock_mode=mock_mode)
 machine.init_machine()
 
 # 初始化 SIP2 Client
@@ -177,7 +180,7 @@ def login():
 def logout():
     """管理員登出"""
     session.pop('logged_in', None)
-    return redirect(url_for('login'))
+    return redirect(url_for('index'))
 
 @app.route('/admin')
 def admin():
@@ -204,14 +207,33 @@ def get_status():
         logger.error(f"status check library error: {e}")
         library_ok = False
 
-    # 檢查機器通訊（若為 mock_mode 視為可用；否則判斷 serial 是否開啟）
+    # 檢查機器通訊
     machine_ok = False
+    machine_debug = {"mock_mode": False, "ser_open": False, "type": None}
     try:
+        machine_debug["type"] = type(machine).__name__ if machine is not None else None
+        # 1) 如果明確為 mock mode，直接視為可用
         if getattr(machine, 'mock_mode', False):
             machine_ok = True
+            machine_debug["mock_mode"] = True
         else:
             ser = getattr(machine, 'ser', None)
-            machine_ok = bool(ser and getattr(ser, 'is_open', False))
+            ser_open = bool(ser and getattr(ser, 'is_open', False))
+            machine_ok = ser_open
+            machine_debug["ser_open"] = ser_open
+
+        # 2) 若仍未判定為可用，嘗試用 get_status() 快速檢查（非侵入式）
+        if not machine_ok and hasattr(machine, 'get_status'):
+            try:
+                resp = machine.get_status()
+                if resp:
+                    # 在 mock 模式下回傳 '2'，實機回傳也會有內容 -> 視為可用
+                    machine_ok = True
+                    # 若回傳是字串數字，標記 mock_mode 相關資訊
+                    if isinstance(resp, str) and resp.strip().isdigit():
+                        machine_debug["mock_mode_guess_from_state"] = True
+            except Exception as e:
+                logger.debug(f"status probe get_status failed: {e}")
     except Exception as e:
         logger.error(f"status check machine error: {e}")
         machine_ok = False
@@ -220,7 +242,8 @@ def get_status():
         "suspended": suspended,
         "limit": limit,
         "library_ok": library_ok,
-        "machine_ok": machine_ok
+        "machine_ok": machine_ok,
+        "machine_debug": machine_debug
     })
 
 @app.route('/api/scan', methods=['POST'])
@@ -293,7 +316,8 @@ def scan_book():
             "author": book_info['author'],
             "image_url": image_url,
             "due_date": due_date_str,
-            "patron_name": book_info.get('patron_name')
+            "patron_name": book_info.get('patron_name'),
+            "has_attachment": book_info.get('has_attachment', False)
         }
     })
 
@@ -303,14 +327,28 @@ def return_book():
     if is_box_full():
         return jsonify({"success": False, "message": "還書箱已滿，暫停服務", "code": "SERVICE_SUSPENDED"}), 503
 
-    data = request.json
+    data = request.json or {}
     book_ids = data.get('book_ids', [])
+    # 支援附件歸還標記 (attachment_only)
+    attachment_only = data.get('attachment_only', False)
+    # 可選：前端掃描的附件條碼，用於後端再次校對
+    attachment_barcode = data.get('attachment_barcode')
     
     if 'book_id' in data:
         book_ids = [data['book_id']]
-
+    
     if not book_ids:
         return jsonify({"success": False, "message": "未選擇任何書籍"}), 400
+
+    # 若為附件歸還，強制為單本流程並要求提供附件條碼以供後端驗證
+    if attachment_only:
+        if len(book_ids) != 1:
+            return jsonify({"success": False, "message": "附件歸還僅支援單本處理"}), 400
+        if not attachment_barcode:
+            return jsonify({"success": False, "message": "缺少附件條碼 (attachment_barcode)"}), 400
+        # 簡單比對：附件條碼需與書籍條碼相符（大小寫不敏感）
+        if attachment_barcode.strip().upper() != book_ids[0].strip().upper():
+            return jsonify({"success": False, "message": "附件條碼與書籍不符，請重新掃描"}), 400
 
     returned_books = []
     current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -322,8 +360,13 @@ def return_book():
 
     if not machine.check_book_status():
         # 如果書沒放好，重開門
-        machine.open_door()
-        return jsonify({"success": False, "message": "書籍未正確放入，請重新投入"}), 400
+        logger.info("Book not detected in return box, reopening door.")
+        machine.reopen_door()
+        return jsonify({
+            "success": False,
+            "message": "未偵測到書籍，請確認書籍已放入並靠右對齊",
+            "code": "BOOK_NOT_DETECTED"
+        }), 400
 
     # 開始處理每一本書 (目前邏輯假設一次一本或批次一起處理)
     # 若是批次，硬體上可能是一次處理一本，這裡簡化為全部成功才算
@@ -334,10 +377,19 @@ def return_book():
     try:
         for b_id in book_ids:
             # SIP2 Checkin
-            if sip2.checkin_book(b_id):
+            # 若僅是歸還附件，不需再次 SIP2 Checkin（或視系統需求而定）
+            # 假設附件歸還也需要 Checkin 或僅記錄
+            checkin_success = True
+            if not attachment_only:
+                 checkin_success = sip2.checkin_book(b_id)
+
+            if checkin_success:
                 # 取得書籍資訊 (為了記錄)
                 book_info = sip2.get_book_info(b_id)
                 title = book_info['title'] if book_info else 'Unknown'
+                if attachment_only:
+                    title += " (附件)"
+                
                 image_url = f"https://picsum.photos/seed/{b_id}/100/150"
 
                 # 寫入本地資料庫
