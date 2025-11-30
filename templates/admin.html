@@ -370,6 +370,36 @@
             .main-content { margin-left: 0; }
             .control-grid { grid-template-columns: repeat(3, 1fr); }
         }
+        
+        /* Toggle Switch */
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 48px;
+            height: 24px;
+        }
+        .switch input { opacity: 0; width: 0; height: 0; }
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background-color: #ccc;
+            transition: .4s;
+            border-radius: 24px;
+        }
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 18px;
+            width: 18px;
+            left: 3px;
+            bottom: 3px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+        }
+        input:checked + .slider { background-color: var(--primary-color); }
+        input:checked + .slider:before { transform: translateX(24px); }
     </style>
 </head>
 <body>
@@ -442,11 +472,14 @@
                 </div>
                 <div class="stat-card">
                     <div class="stat-icon" style="background: rgba(5, 205, 153, 0.1); color: var(--success-color);">
-                        <i class="fas fa-check-circle"></i>
+                        <i class="fas fa-robot"></i>
                     </div>
                     <div class="stat-info">
-                        <h3>系統狀態</h3>
-                        <p style="font-size: 18px;">運行正常</p>
+                        <h3>機器狀態</h3>
+                        <p style="font-size: 18px;">
+                            <span id="machine-state-badge" class="status-badge">未知</span>
+                            <span id="machine-state-text" style="margin-left:8px;color:var(--text-secondary); font-size:14px;"></span>
+                        </p>
                     </div>
                 </div>
                 <div class="stat-card">
@@ -510,6 +543,10 @@
                     <div class="card-header">
                         <h2 class="card-title">快速指令</h2>
                     </div>
+                    <div style="margin-bottom:12px;">
+                        <span id="machine-control-state" class="status-badge">未知</span>
+                        <small id="machine-control-sub" style="color:var(--text-secondary); margin-left:8px;"></small>
+                    </div>
                     <div class="control-grid" style="grid-template-columns: repeat(4, 1fr);">
                         <button class="control-btn" onclick="sendMachineCommand('dep1')">
                             <i class="fas fa-power-off" style="color: var(--success-color);"></i> 電源開啟
@@ -570,19 +607,65 @@
 
                 <div style="height: 1px; background: var(--border-color); margin: 30px 0;"></div>
 
+                <h3 style="margin-bottom: 20px;">圖書館資料庫 (SIP2)</h3>
+                <div class="form-group">
+                    <label class="form-label">伺服器 IP (Host)</label>
+                    <input type="text" id="lib-host" class="form-input" placeholder="192.168.1.100">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">連接埠 (Port)</label>
+                    <input type="number" id="lib-port" class="form-input" placeholder="6001">
+                </div>
+
+                <div class="form-group" style="display:flex; align-items:center; gap:12px; margin-top:20px; margin-bottom:20px;">
+                    <label class="switch">
+                        <input type="checkbox" id="lib-login-enabled" onchange="toggleLibLogin(this.checked)">
+                        <span class="slider round"></span>
+                    </label>
+                    <label for="lib-login-enabled" style="cursor:pointer; color:var(--text-primary); font-weight:500;">啟用 SIP2 帳號登入</label>
+                </div>
+
+                <div id="lib-login-fields" style="display:none; padding-left:12px; border-left:3px solid var(--border-color);">
+                    <div class="form-group">
+                        <label class="form-label">登入帳號 (Login User)</label>
+                        <input type="text" id="lib-user" class="form-input" placeholder="選填">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">登入密碼 (Login Pass)</label>
+                        <input type="password" id="lib-pass" class="form-input" placeholder="選填">
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">機構代碼 (AO Institution ID)</label>
+                    <input type="text" id="lib-inst" class="form-input" placeholder="MAIN">
+                    <small style="color:var(--text-secondary)">預設為 MAIN，請依據 SIP2 Server 要求填寫</small>
+                </div>
+
+                <div style="margin-top: 10px; display: flex; justify-content: flex-end; gap: 10px;">
+                     <button class="btn btn-secondary" onclick="testLibraryConn()" style="background:#e0e5f2; color:#5f6c7b;">
+                        <i class="fas fa-network-wired"></i> 測試 SIP2 連線
+                    </button>
+                </div>
+
+                <div style="height: 1px; background: var(--border-color); margin: 30px 0;"></div>
+
                 <h3 style="margin-bottom: 20px;">UART 硬體連線</h3>
                 <div class="form-group">
                     <label class="form-label">序列埠 (Port)</label>
-                    <input type="text" id="uart-port" class="form-input" placeholder="/dev/ttyUSB0">
+                    <input type="text" id="uart-port" class="form-input" placeholder="/dev/uno">
                 </div>
                 <div class="form-group">
                     <label class="form-label">鮑率 (Baudrate)</label>
                     <input type="number" id="uart-baud" class="form-input" placeholder="38400">
                 </div>
 
-                <div style="margin-top: 30px; display: flex; justify-content: flex-end;">
+                <div style="margin-top: 30px; display: flex; justify-content: flex-end; gap: 10px;">
+                    <button class="btn btn-warning" onclick="testUART()">
+                        <i class="fas fa-plug"></i> 測試 UART
+                    </button>
                     <button class="btn btn-primary" onclick="saveSettings()">
-                        <i class="fas fa-save"></i> 儲存設定
+                        <i class="fas fa-save"></i> 儲存所有設定
                     </button>
                 </div>
             </div>
@@ -624,6 +707,7 @@
             fetchLogs();
             fetchStatus();
             fetchUART();
+            fetchLibraryConfig();
             resetIdleTimer();
         });
 
@@ -699,6 +783,50 @@
                 const data = await res.json();
                 const limitEl = document.getElementById('total-limit');
                 if (limitEl && data.limit !== undefined) limitEl.textContent = data.limit;
+
+                // 更新機器狀態顯示（轉換為可讀文字）
+                const state = data.machine_state || 'unknown';
+                const homing = !!data.homing_in_progress;
+                const is_homed = !!data.is_homed;
+
+                const map = {
+                    sleeping: ['休眠', '#ffb547'],
+                    homing: ['回原點中', '#ffb547'],
+                    homed: ['就緒', '#2ecc71'],
+                    opened: ['開啟中', '#4361ee'],
+                    closed: ['關閉', '#a3aed0'],
+                    power_on_not_homed: ['已上電(未回原點)', '#ffb547'],
+                    unavailable: ['不可用', '#dc3545'],
+                    ready: ['就緒', '#2ecc71'],
+                    error: ['錯誤', '#dc3545'],
+                    unknown: ['未知', '#a3aed0']
+                };
+                const label = (map[state] && map[state][0]) || '未知';
+                const color = (map[state] && map[state][1]) || '#a3aed0';
+
+                const badge = document.getElementById('machine-state-badge');
+                const txt = document.getElementById('machine-state-text');
+                const mini = document.getElementById('machine-control-state');
+                const sub = document.getElementById('machine-control-sub');
+
+                if (badge) {
+                    badge.textContent = label;
+                    badge.style.backgroundColor = 'rgba(0,0,0,0.03)';
+                    badge.style.color = color;
+                }
+                if (txt) {
+                    if (homing) txt.textContent = '回原點中';
+                    else if (is_homed) txt.textContent = '機器已回原點並就緒';
+                    else txt.textContent = '';
+                }
+                if (mini) {
+                    mini.textContent = label;
+                    mini.style.backgroundColor = 'rgba(0,0,0,0.03)';
+                    mini.style.color = color;
+                }
+                if (sub) {
+                    sub.textContent = homing ? 'Homing…' : (is_homed ? 'Homed' : '');
+                }
             } catch (e) { console.error(e); }
         }
 
@@ -854,7 +982,13 @@
                 }
                 respEl.scrollTop = respEl.scrollHeight;
             } catch (e) {
-                respEl.value += `\nEXCEPTION: ${e}`;
+                console.error(e);
+                let msg = e.toString();
+                if (e.name === 'TypeError' && e.message.includes('NetworkError')) {
+                    msg = "無法連接伺服器 (NetworkError)。請檢查後端服務是否正在執行。";
+                }
+                respEl.value += `\nEXCEPTION: ${msg}`;
+                respEl.scrollTop = respEl.scrollHeight;
             }
         }
 
@@ -879,26 +1013,140 @@
             } catch(e) {}
         }
 
+        async function fetchLibraryConfig() {
+            try {
+                const res = await fetch('/api/admin/get_library_config');
+                if(!res.ok) return;
+                const data = await res.json();
+                if(data.success && data.config) {
+                    document.getElementById('lib-host').value = data.config.host || '';
+                    document.getElementById('lib-port').value = data.config.port || '';
+                    document.getElementById('lib-user').value = data.config.login_user || '';
+                    document.getElementById('lib-pass').value = data.config.login_pass || '';
+                    document.getElementById('lib-inst').value = data.config.institution_id || '';
+                    
+                    const enabled = !!data.config.login_enabled;
+                    document.getElementById('lib-login-enabled').checked = enabled;
+                    toggleLibLogin(enabled);
+                }
+            } catch(e) {}
+        }
+
+        function toggleLibLogin(enabled) {
+            const fields = document.getElementById('lib-login-fields');
+            fields.style.display = enabled ? 'block' : 'none';
+        }
+
+        async function testLibraryConn() {
+            showLoading(true);
+            const host = document.getElementById('lib-host').value;
+            const port = document.getElementById('lib-port').value;
+            const loginEnabled = document.getElementById('lib-login-enabled').checked;
+            const user = document.getElementById('lib-user').value;
+            const pass = document.getElementById('lib-pass').value;
+            const inst = document.getElementById('lib-inst').value;
+
+            try {
+                const res = await fetch('/api/admin/test_library_conn', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        host, port,
+                        login_enabled: loginEnabled,
+                        login_user: user, login_pass: pass, institution_id: inst
+                    })
+                });
+                const data = await res.json();
+                if(data.success) {
+                    alert('測試成功：' + data.message);
+                } else {
+                    alert('測試失敗：' + data.message);
+                }
+            } catch(e) {
+                alert('測試請求失敗: ' + e);
+            }
+            showLoading(false);
+        }
+
+        async function testUART() {
+            showLoading(true);
+            const port = document.getElementById('uart-port').value;
+            const baud = parseInt(document.getElementById('uart-baud').value);
+            const respEl = document.getElementById('machine-response');
+            
+            respEl.value += `\n> Testing UART Connection: ${port} @ ${baud}...`;
+            respEl.scrollTop = respEl.scrollHeight;
+
+            try {
+                const res = await fetch('/api/admin/test_uart', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ port, baudrate: baud })
+                });
+                const data = await res.json();
+                const time = new Date().toLocaleTimeString();
+                
+                if (data.success) {
+                    respEl.value += `\n[${time}] TEST OK: ${data.message}`;
+                    alert(data.message);
+                } else {
+                    respEl.value += `\n[${time}] TEST FAILED: ${data.message}`;
+                    alert(data.message);
+                }
+            } catch(e) {
+                respEl.value += `\nEXCEPTION: ${e}`;
+                alert('測試請求失敗');
+            }
+            respEl.scrollTop = respEl.scrollHeight;
+            showLoading(false);
+        }
+
         async function saveSettings() {
             showLoading(true);
             const limit = parseInt(document.getElementById('settings-limit').value);
+            
+            // UART
             const port = document.getElementById('uart-port').value;
             const baud = parseInt(document.getElementById('uart-baud').value);
 
+            // Library
+            const libHost = document.getElementById('lib-host').value;
+            const libPort = document.getElementById('lib-port').value;
+            const libLoginEnabled = document.getElementById('lib-login-enabled').checked;
+            const libUser = document.getElementById('lib-user').value;
+            const libPass = document.getElementById('lib-pass').value;
+            const libInst = document.getElementById('lib-inst').value;
+
             try {
+                // 1. Limit
                 await fetch('/api/admin/set_limit', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({ limit })
                 });
                 
+                // 2. UART
                 await fetch('/api/admin/set_uart', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({ port, baudrate: baud })
                 });
+
+                // 3. Library
+                await fetch('/api/admin/set_library_config', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        host: libHost,
+                        port: libPort,
+                        login_enabled: libLoginEnabled,
+                        login_user: libUser,
+                        login_pass: libPass,
+                        institution_id: libInst
+                    })
+                });
                 
-                alert('設定已儲存');
+                alert('所有設定已儲存並生效');
                 fetchStatus();
             } catch(e) { alert('儲存失敗'); }
             showLoading(false);

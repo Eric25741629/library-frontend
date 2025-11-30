@@ -16,17 +16,26 @@ BARCODE_LOGIN_ENABLED = bool(_cfg.get('barcode_login_enabled', True))
 REQUIRE_ADMIN_LOGIN = bool(_cfg.get('require_admin_login', False))
 MAX_RETURN_LIMIT = int(_cfg.get('max_return_limit', 20))
 
-MACHINE_CONFIG = _cfg.get('machine', {'port': '/dev/ttyUSB0', 'baudrate': 38400, 'mock_mode': True})
-MACHINE_PORT = MACHINE_CONFIG.get('port', '/dev/ttyUSB0')
+MACHINE_CONFIG = _cfg.get('machine', {'port': '/dev/uno', 'baudrate': 38400})
+MACHINE_PORT = MACHINE_CONFIG.get('port', '/dev/uno')
 MACHINE_BAUDRATE = int(MACHINE_CONFIG.get('baudrate', 38400))
-MACHINE_MOCK_MODE = bool(MACHINE_CONFIG.get('mock_mode', True))
 
 LOG_BACKUP_DAYS = int((_cfg.get('logs') or {}).get('backup_days', 30))
+
+LIBRARY_CONFIG = _cfg.get('library', {})
+LIBRARY_HOST = LIBRARY_CONFIG.get('host', '192.168.1.100')
+LIBRARY_PORT = int(LIBRARY_CONFIG.get('port', 6001))
+LIBRARY_LOGIN_ENABLED = bool(LIBRARY_CONFIG.get('login_enabled', False))
+LIBRARY_USER = LIBRARY_CONFIG.get('login_user', '')
+LIBRARY_PASS = LIBRARY_CONFIG.get('login_pass', '')
+LIBRARY_INSTITUTION = LIBRARY_CONFIG.get('institution_id', 'MAIN')
 
 # 重新載入函式（如需在執行時重讀設定）
 def reload_config():
     global _cfg, ADMIN_PASSWORD, BARCODE_LOGIN_ENABLED, REQUIRE_ADMIN_LOGIN, MAX_RETURN_LIMIT
-    global MACHINE_CONFIG, MACHINE_PORT, MACHINE_BAUDRATE, MACHINE_MOCK_MODE, LOG_BACKUP_DAYS
+    global MACHINE_CONFIG, MACHINE_PORT, MACHINE_BAUDRATE, LOG_BACKUP_DAYS
+    global LIBRARY_CONFIG, LIBRARY_HOST, LIBRARY_PORT, LIBRARY_LOGIN_ENABLED, LIBRARY_USER, LIBRARY_PASS, LIBRARY_INSTITUTION
+    
     if cfg_file.exists():
         try:
             _cfg = yaml.safe_load(cfg_file.read_text(encoding='utf-8')) or {}
@@ -36,8 +45,17 @@ def reload_config():
     BARCODE_LOGIN_ENABLED = bool(_cfg.get('barcode_login_enabled', True))
     REQUIRE_ADMIN_LOGIN = bool(_cfg.get('require_admin_login', False))
     MAX_RETURN_LIMIT = int(_cfg.get('max_return_limit', 20))
-    MACHINE_CONFIG = _cfg.get('machine', {'port': '/dev/ttyUSB0', 'baudrate': 38400, 'mock_mode': True})
-    MACHINE_PORT = MACHINE_CONFIG.get('port', '/dev/ttyUSB0')
+    
+    MACHINE_CONFIG = _cfg.get('machine', {'port': '/dev/uno', 'baudrate': 38400})
+    MACHINE_PORT = MACHINE_CONFIG.get('port', '/dev/uno')
     MACHINE_BAUDRATE = int(MACHINE_CONFIG.get('baudrate', 38400))
-    MACHINE_MOCK_MODE = bool(MACHINE_CONFIG.get('mock_mode', True))
+    
     LOG_BACKUP_DAYS = int((_cfg.get('logs') or {}).get('backup_days', 30))
+    
+    LIBRARY_CONFIG = _cfg.get('library', {})
+    LIBRARY_HOST = LIBRARY_CONFIG.get('host', '192.168.1.100')
+    LIBRARY_PORT = int(LIBRARY_CONFIG.get('port', 6001))
+    LIBRARY_LOGIN_ENABLED = bool(LIBRARY_CONFIG.get('login_enabled', False))
+    LIBRARY_USER = LIBRARY_CONFIG.get('login_user', '')
+    LIBRARY_PASS = LIBRARY_CONFIG.get('login_pass', '')
+    LIBRARY_INSTITUTION = LIBRARY_CONFIG.get('institution_id', 'MAIN')

@@ -50,7 +50,7 @@
                 <h2 class="welcome-title">智慧還書，流暢體驗</h2>
                 <p class="welcome-subtitle">歡迎使用國立雲林科技大學圖書館自助還書服務</p>
                 <div class="action-buttons">
-                    <button class="btn-primary btn-large" onclick="nextStep('step-scan')">
+                    <button class="btn-primary btn-large" onclick="startReturnProcess()">
                         <i class="fas fa-book-reader"></i> 開始還書
                     </button>
                 </div>
@@ -63,7 +63,7 @@
             
             <div class="scan-area-container">
                 <div class="scan-box" id="main-scan-box">
-                    <i class="fas fa-barcode" style="font-size: 10rem; color: #d1d9e6;"></i>
+                    <i class="fas fa-barcode" style="font-size: 8rem; color: #d1d9e6;"></i>
                 </div>
             </div>
             
@@ -73,7 +73,7 @@
             <input type="text" id="barcode-input" class="barcode-input-field" placeholder="游標請停留在這並掃描..." autocomplete="off" autofocus>
 
             <div class="action-buttons">
-                <button class="btn-danger btn-medium" onclick="resetFlow()">
+                <button class="btn-danger btn-medium" onclick="resetFlow(this)">
                     <i class="fas fa-times"></i> 取消還書
                 </button>
             </div>
@@ -90,7 +90,7 @@
             </div>
 
             <div class="action-buttons-vertical">
-                <button class="btn-primary btn-block" onclick="goToPlaceBookStep()">
+                <button class="btn-primary btn-block" onclick="goToPlaceBookStep(this)">
                     <i class="fas fa-arrow-right"></i> 下一步：投入還書箱
                 </button>
             </div>
@@ -109,7 +109,7 @@
                         </div>
                         <div class="guide-book-3d-container">
                             <!-- SVG 平放書本示意圖 (Top-down view) -->
-                            <svg width="260" height="260" viewBox="0 0 260 260" class="book-svg">
+                            <svg width="200" height="200" viewBox="0 0 260 260" class="book-svg">
                                 <defs>
                                     <filter id="flatShadow" x="-20%" y="-20%" width="140%" height="140%">
                                         <feGaussianBlur in="SourceAlpha" stdDeviation="4"/>
@@ -155,14 +155,14 @@
                         </div>
                     </div>
                 </div>
-                <p style="font-size: 1.5rem; color: #555; margin-bottom: 1rem;">請確認書籍已放入</p>
-                <p style="font-size: 1.3rem; color: #c0392b; margin-bottom: 3rem; font-weight: bold;">
+                <p style="font-size: 1.3rem; color: #555; margin-bottom: 0.5rem;">請確認書籍已放入</p>
+                <p style="font-size: 1.2rem; color: #c0392b; margin-bottom: 1rem; font-weight: bold;">
                     請以書背朝向機器的方向投入
                 </p>
             </div>
 
             <div class="action-buttons">
-                <button class="btn-primary btn-large btn-pulse" onclick="finalizeReturn()">
+                <button class="btn-primary btn-large btn-pulse" onclick="finalizeReturn(this)">
                     <i class="fas fa-check"></i> 完成投入
                 </button>
             </div>
@@ -186,7 +186,7 @@
             </div>
             
             <div class="action-buttons">
-                <button class="btn-primary btn-large" onclick="processBookWithAttachment()">
+                <button class="btn-primary btn-large" onclick="processBookWithAttachment(this)">
                     <i class="fas fa-check"></i> 我知道了，先投入書籍
                 </button>
             </div>
@@ -198,7 +198,7 @@
             
             <div class="scan-area-container">
                 <div class="scan-box" style="border-color: #ffc107;" id="attachment-scan-box">
-                    <i class="fas fa-barcode" style="font-size: 10rem; color: #d1d9e6;"></i>
+                    <i class="fas fa-barcode" style="font-size: 8rem; color: #d1d9e6;"></i>
                 </div>
             </div>
             
@@ -228,7 +228,7 @@
             </div>
 
             <div class="action-buttons">
-                <button class="btn-primary btn-large btn-pulse" onclick="finalizeAttachmentReturn()">
+                <button class="btn-primary btn-large btn-pulse" onclick="finalizeAttachmentReturn(this)">
                     <i class="fas fa-check"></i> 完成附件投入
                 </button>
             </div>
@@ -245,7 +245,7 @@
                 
                 <p style="color: #888; margin-bottom: 1.5rem;">將在 <span id="countdown-sec" style="color: var(--primary-blue); font-weight: bold;">5</span> 秒後自動返回首頁</p>
 
-                <button class="btn-primary btn-medium" onclick="resetFlow()">
+                <button class="btn-primary btn-medium" onclick="resetFlow(this)">
                     <i class="fas fa-home"></i> 返回首頁
                 </button>
             </div>
@@ -289,6 +289,29 @@
         updateTime();
 
         // 流程控制
+        async function startReturnProcess() {
+            // 點擊開始還書時，先檢查圖書館連線
+            showLoading('檢查圖書館連線中...');
+            try {
+                const res = await fetch('/api/status');
+                const data = await res.json();
+                hideLoading();
+
+                if (!data.library_ok) {
+                    // 若連線失敗，提示使用者並阻止進入下一步
+                    alert('無法連線至圖書館伺服器，暫無法提供還書服務。\n請通知櫃台人員或稍後再試。');
+                    return;
+                }
+                
+                // 連線正常，進入下一步
+                nextStep('step-scan');
+            } catch (e) {
+                hideLoading();
+                alert('系統檢查失敗，請稍後再試。');
+                console.error(e);
+            }
+        }
+
         function nextStep(stepId) {
             // Hide all sections
             document.querySelectorAll('.step-section').forEach(el => el.classList.remove('active'));
@@ -327,14 +350,35 @@
         let autoRedirectTimer;
         let countdownInterval;
 
-        function resetFlow() {
+        async function resetFlow(btn) {
+            // 若有按鈕來源，避免重複點擊
+            if (btn) btn.disabled = true;
+            // 嘗試喚醒並回原點，確保機器回到標準狀態，避免殘留 state4
+            showLoading('正在回原點，稍候…');
+            try {
+                const res = await fetch('/api/hardware/wake_and_home', { method: 'POST' });
+                // 若 homing 失敗，也不要阻塞使用者太久，只記錄並提示
+                if (!res.ok) {
+                    const j = await res.json().catch(()=>({}));
+                    console.warn('wake_and_home failed', j);
+                    // 可選：顯示短暫提示但仍重置介面
+                    alert(j.message || '機器回原點失敗，請通知管理員。');
+                }
+            } catch (e) {
+                console.error('wake_and_home request error', e);
+            } finally {
+                hideLoading();
+            }
+    
             clearTimeout(autoRedirectTimer);
             clearInterval(countdownInterval);
-
+    
             scannedBooks = [];
             currentProcessingBook = null;
             updateBookList();
             nextStep('step-welcome');
+    
+            if (btn) setTimeout(() => { try { btn.disabled = false } catch(e){} }, 500);
         }
 
         // 處理掃描邏輯
@@ -464,11 +508,22 @@
         }
 
         // 前往投入書籍步驟（會呼叫硬體開門，顯示等待畫面直到完成）
-        async function goToPlaceBookStep() {
+        async function goToPlaceBookStep(btn) {
             if (scannedBooks.length === 0) return;
-            showLoading('正在開啟投書口，請稍候…');
-
+            if (btn) btn.disabled = true;
+            // 先喚醒並執行 homing，再執行 open，避免因 state4 導致 open 失敗
+            showLoading('喚醒並回原點中，稍候再開啟投書口…');
             try {
+                const wakeRes = await fetch('/api/hardware/wake_and_home', { method: 'POST' });
+                const wakeJson = await wakeRes.json().catch(()=>({}));
+                if (!wakeRes.ok || !wakeJson.success) {
+                    hideLoading();
+                    alert(wakeJson.message || '喚醒或回原點失敗，請稍候再試');
+                    return;
+                }
+    
+                // 喚醒並回原點成功，接著開門
+                showLoading('正在開啟投書口，請稍候…');
                 const res = await fetch('/api/hardware/open', { method: 'POST' });
                 const result = await res.json();
                 if (res.ok && result.success) {
@@ -482,6 +537,8 @@
                 hideLoading();
                 console.error(e);
                 alert('系統錯誤，請稍後再試');
+            } finally {
+                if (btn) setTimeout(() => { try { btn.disabled = false } catch(e){} }, 500);
             }
         }
 
@@ -502,20 +559,32 @@
         }
 
         // 確認還書 (最終步驟 - 一般書籍)
-        async function finalizeReturn() {
+        // 改為在送出還書前確保機器已喚醒並回原點，避免因 state4 卡住導致關門/分類失敗
+        async function finalizeReturn(btn) {
             if (scannedBooks.length === 0) return;
+            if (btn) btn.disabled = true;
     
             const bookIds = scannedBooks.map(b => b.book_id);
-            showLoading('正在處理還書，請稍候…');
-
+            // 先喚醒並回原點
+            showLoading('喚醒並回原點中，準備關門並處理還書…');
             try {
+                const wakeRes = await fetch('/api/hardware/wake_and_home', { method: 'POST' });
+                const wakeJson = await wakeRes.json().catch(()=>({}));
+                if (!wakeRes.ok || !wakeJson.success) {
+                    hideLoading();
+                    alert(wakeJson.message || '喚醒或回原點失敗，請稍候再試');
+                    return;
+                }
+    
+                // 已喚醒並回原點，執行還書 API（關門與檢查由後端處理）
+                showLoading('正在處理還書，請稍候…');
                 const response = await fetch('/api/return', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({ book_ids: bookIds })
                 });
                 const result = await response.json();
-
+    
                 if (result.success) {
                     hideLoading();
                     nextStep('step-success');
@@ -534,36 +603,51 @@
                 hideLoading();
                 console.error(e);
                 alert('系統錯誤');
+            } finally {
+                if (btn) setTimeout(() => { try { btn.disabled = false } catch(e){} }, 500);
             }
         }
 
         // --- 附件處理流程 ---
 
         // 1. 使用者確認先投書 -> 開門 -> 進入投書畫面 (這裡復用 goToPlaceBookStep 邏輯，但要改一下下一步)
-        async function processBookWithAttachment() {
-             showLoading('正在開啟投書口 (書籍)，請稍候…');
-             try {
-                const res = await fetch('/api/hardware/open', { method: 'POST' });
-                const result = await res.json();
-                if (res.ok && result.success) {
-                    hideLoading();
-                    // 這裡暫時顯示通用的投書畫面，但按鈕行為要變
-                    nextStep('step-place-book');
-                    // 修改按鈕行為，使其觸發 "書籍已投，準備投附件"
-                    const btn = document.querySelector('#step-place-book button');
-                    if(btn) {
-                        btn.onclick = finishBookAndStartAttachment;
-                        btn.innerHTML = '<i class="fas fa-arrow-right"></i> 完成書籍投入，下一步';
-                    }
-                } else {
-                    hideLoading();
-                    alert(result.message || '開啟投書口失敗');
-                }
-            } catch (e) {
-                hideLoading();
-                alert('系統錯誤');
-            }
-        }
+        async function processBookWithAttachment(btn) {
+            if (btn) btn.disabled = true;
+            // 先確保機器已喚醒並回原點，避免 state4 卡住
+            showLoading('喚醒並回原點中，稍候再開啟投書口 (書籍)…');
+            try {
+               const wakeRes = await fetch('/api/hardware/wake_and_home', { method: 'POST' });
+               const wakeJson = await wakeRes.json().catch(()=>({}));
+               if (!wakeRes.ok || !wakeJson.success) {
+                   hideLoading();
+                   alert(wakeJson.message || '喚醒或回原點失敗，請稍候再試');
+                   return;
+               }
+   
+               // 喚醒並回原點成功，開門讓使用者放書
+               showLoading('正在開啟投書口 (書籍)，請稍候…');
+               const res = await fetch('/api/hardware/open', { method: 'POST' });
+               const result = await res.json();
+               if (res.ok && result.success) {
+                   hideLoading();
+                   nextStep('step-place-book');
+                   // 修改按鈕行為，使其觸發 "書籍已投，準備投附件"
+                   const btnInner = document.querySelector('#step-place-book button');
+                   if(btnInner) {
+                       btnInner.onclick = finishBookAndStartAttachment;
+                       btnInner.innerHTML = '<i class="fas fa-arrow-right"></i> 完成書籍投入，下一步';
+                   }
+               } else {
+                   hideLoading();
+                   alert(result.message || '開啟投書口失敗');
+               }
+           } catch (e) {
+               hideLoading();
+               alert('系統錯誤');
+           } finally {
+               if (btn) setTimeout(() => { try { btn.disabled = false } catch(e){} }, 500);
+           }
+       }
 
         // 2. 書籍投入完成 -> 關門確認 -> 進入附件掃描 -> 驗證 -> 再開門 -> 提示投附件
         async function finishBookAndStartAttachment() {
@@ -634,39 +718,56 @@
 
         // 2.6 開啟投書口供附件投入
         async function startAttachmentInsertion() {
-             showLoading('正在開啟投書口 (附件)，請稍候…');
-             
-             // 稍微延遲讓使用者看到成功訊息
-             setTimeout(async () => {
-                 try {
-                     const res = await fetch('/api/hardware/open', { method: 'POST' });
-                     const result = await res.json();
-                     if (res.ok && result.success) {
+             // 先喚醒並回原點，確保能安全開門接收附件
+             showLoading('喚醒並回原點中，稍候再開啟投書口 (附件)…');
+             try {
+                 const wakeRes = await fetch('/api/hardware/wake_and_home', { method: 'POST' });
+                 const wakeJson = await wakeRes.json().catch(()=>({}));
+                 if (!wakeRes.ok || !wakeJson.success) {
+                     hideLoading();
+                     alert(wakeJson.message || '喚醒或回原點失敗，請稍候再試');
+                     nextStep('step-success');
+                     return;
+                 }
+   
+                 // 稍微延遲讓使用者看到成功訊息
+                 setTimeout(async () => {
+                     try {
+                         const res = await fetch('/api/hardware/open', { method: 'POST' });
+                         const result = await res.json();
+                         if (res.ok && result.success) {
+                            hideLoading();
+                            nextStep('step-insert-attachment');
+                         } else {
+                            hideLoading();
+                            alert(result.message || '開啟投書口失敗');
+                            // 即使失敗，也許應該允許重試或結束
+                            alert('無法開啟投書口接收附件，請洽櫃台');
+                            nextStep('step-success');
+                         }
+                     } catch (e) {
                         hideLoading();
-                        nextStep('step-insert-attachment');
-                     } else {
-                        hideLoading();
-                        alert(result.message || '開啟投書口失敗');
-                        // 即使失敗，也許應該允許重試或結束
-                        alert('無法開啟投書口接收附件，請洽櫃台');
+                        alert('系統錯誤');
                         nextStep('step-success');
                      }
-                 } catch (e) {
-                    hideLoading();
-                    alert('系統錯誤');
-                 }
-             }, 1000);
+                 }, 1000);
+             } catch (e) {
+                 hideLoading();
+                 alert('系統錯誤，請稍後再試');
+                 nextStep('step-success');
+             }
         }
 
         // 3. 附件投入完成 -> 關門 -> 結束
-        async function finalizeAttachmentReturn() {
+        async function finalizeAttachmentReturn(btn) {
              if(!currentProcessingBook) return;
              if(!currentAttachmentBarcode) {
                  alert('尚未掃描附件條碼，請先掃描以便核對');
                  return;
              }
+             if (btn) btn.disabled = true;
              showLoading('正在處理附件，請稍候…');
-
+   
              try {
                 // 再次呼叫 return API，但標記為附件 (後端僅記錄或再次 checkin)
                 const response = await fetch('/api/return', {
@@ -679,7 +780,7 @@
                     })
                 });
                 const result = await response.json();
-
+   
                 if(result.success) {
                     hideLoading();
                     // 清除暫存
@@ -696,6 +797,8 @@
                  hideLoading();
                  alert('系統錯誤');
                  nextStep('step-success');
+             } finally {
+                 if (btn) setTimeout(() => { try { btn.disabled = false } catch(e){} }, 500);
              }
         }
 

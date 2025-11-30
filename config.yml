@@ -4,9 +4,16 @@ require_admin_login: false
 max_return_limit: 20
 
 machine:
-  port: "/dev/ttyUSB0"
+  port: "/dev/uno"
   baudrate: 38400
-  mock_mode: true
 
 logs:
   backup_days: 30
+
+library:
+  host: "192.168.1.100"
+  port: 6001
+  login_enabled: false
+  login_user: ""
+  login_pass: ""
+  institution_id: "MAIN"

@@ -1,0 +1,625 @@
+<script>
+        let scannedBooks = [];
+        let currentProcessingBook = null; // 當前正在處理含附件的書籍
+        let currentAttachmentBarcode = null; // 已掃描的附件條碼（送至後端驗證）
+        
+        // 更新時間
+        function updateTime() {
+            const now = new Date();
+            const dateStr = now.toLocaleDateString('zh-TW', { year: 'numeric', month: 'long', day: 'numeric' });
+            const timeStr = now.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' });
+            document.getElementById('current-time').textContent = `${timeStr} | ${dateStr}`;
+        }
+        setInterval(updateTime, 1000);
+        updateTime();
+    
+        // 流程控制
+        function nextStep(stepId) {
+            // Hide all sections
+            document.querySelectorAll('.step-section').forEach(el => el.classList.remove('active'));
+            // Show target section
+            const target = document.getElementById(stepId);
+            target.classList.add('active');
+    
+            // Special logic for scan step
+            if (stepId === 'step-scan') {
+                const input = document.getElementById('barcode-input');
+                input.value = '';
+                input.focus();
+                document.getElementById('main-scan-box').classList.add('active');
+            } else if (stepId === 'step-scan-attachment') {
+                const input = document.getElementById('attachment-barcode-input');
+                if(input) {
+                    input.value = '';
+                    setTimeout(() => input.focus(), 100);
+                }
+            }
+        }
+    
+        // 顯示 / 隱藏 Loading Overlay（用於硬體控制命令）
+        function showLoading(message) {
+            const overlay = document.getElementById('loading-overlay');
+            const msg = document.getElementById('loading-message');
+            if (msg) msg.textContent = message || '';
+            if (overlay) overlay.style.display = 'flex';
+        }
+    
+        function hideLoading() {
+            const overlay = document.getElementById('loading-overlay');
+            if (overlay) overlay.style.display = 'none';
+        }
+    
+        let autoRedirectTimer;
+        let countdownInterval;
+        // 當觸發 homing（wake_and_home）或其他會佔用 serial 的長時間指令時，
+        // 我們暫停 /api/status 的輪詢以避免與機器指令衝突。
+        // SKIP_STATUS_UNTIL 存放取樣暫停到的時間（ms since epoch）。
+        let SKIP_STATUS_UNTIL = 0;
+    
+        async function resetFlow(btn) {
+            // 若有按鈕來源，避免重複點擊
+            if (btn) btn.disabled = true;
+            // 嘗試喚醒並回原點，確保機器回到標準狀態，避免殘留 state4
+            showLoading('正在回原點，稍候…');
+            try {
+                // 暫停 status poll 以避免與同步 homing 指令衝突
+                SKIP_STATUS_UNTIL = Date.now() + 10000; // 10 秒內跳過狀態查詢
+                const res = await fetch('/api/hardware/wake_and_home', { method: 'POST' });
+                // 若 homing 失敗，也不要阻塞使用者太久，只記錄並提示
+                if (!res.ok) {
+                    const j = await res.json().catch(()=>({}));
+                    console.warn('wake_and_home failed', j);
+                    // 可選：顯示短暫提示但仍重置介面
+                    alert(j.message || '機器回原點失敗，請通知管理員。');
+                }
+                // 指令完成後（不論成功與否），清除暫停旗標並立即更新狀態
+                SKIP_STATUS_UNTIL = 0;
+                checkSystemStatus();
+            } catch (e) {
+                console.error('wake_and_home request error', e);
+            } finally {
+                hideLoading();
+            }
+    
+            clearTimeout(autoRedirectTimer);
+            clearInterval(countdownInterval);
+    
+            scannedBooks = [];
+            currentProcessingBook = null;
+            updateBookList();
+            nextStep('step-welcome');
+    
+            if (btn) setTimeout(() => { try { btn.disabled = false } catch(e){} }, 500);
+        }
+    
+        // 處理掃描邏輯
+        async function handleScan(bookId) {
+            if (!bookId) return;
+            
+            const statusText = document.getElementById('scan-status-text');
+    
+            // 檢查是否重複掃描
+            if (scannedBooks.some(b => b.book_id === bookId)) {
+                statusText.textContent = '此書籍已在清單中';
+                statusText.style.color = 'orange';
+                setTimeout(() => {
+                    statusText.textContent = '系統就緒，請掃描書籍條碼';
+                    statusText.style.color = '#666';
+                }, 2000);
+                return;
+            }
+            
+            document.getElementById('main-scan-box').classList.add('active');
+    
+            try {
+                const response = await fetch('/api/scan', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ book_id: bookId })
+                });
+                const result = await response.json();
+    
+                if (result.success) {
+                    scannedBooks.push(result.data);
+                    updateBookList();
+                    // 檢查是否有附件
+                    if (result.data.has_attachment) {
+                        currentProcessingBook = result.data;
+                        nextStep('step-attachment-prompt');
+                    } else {
+                        nextStep('step-confirm');
+                    }
+                } else {
+                    // 處理逾期錯誤
+                    if (result.code === 'OVERDUE') {
+                        // 顯示逾期警告並在 5 秒後跳回首頁
+                        const bookData = result.data || {};
+                        statusText.innerHTML = `
+                            <div style="color: #dc3545; font-weight: bold;">
+                                <i class="fas fa-exclamation-triangle"></i> 禁止還書：書籍已逾期<br>
+                                書名：${bookData.title || ''}<br>
+                                到期日：${bookData.due_date || ''}<br>
+                                借閱者：${bookData.patron_name || ''}<br>
+                                請至人工櫃台歸還
+                            </div>
+                        `;
+                        
+                        setTimeout(() => {
+                            resetFlow(); // 5秒後跳回首頁
+                        }, 5000);
+                        return;
+                    }
+    
+                    statusText.textContent = result.message || '掃描失敗';
+                    statusText.style.color = 'red';
+                    // 3秒後重置狀態
+                    setTimeout(() => {
+                        statusText.textContent = '系統就緒，請掃描書籍條碼';
+                        statusText.style.color = 'var(--text-light)';
+                    }, 3000);
+                    document.getElementById('main-scan-box').classList.remove('active');
+                }
+            } catch (e) {
+                console.error(e);
+                statusText.textContent = '系統錯誤，請稍後再試';
+                statusText.style.color = 'red';
+            }
+        }
+    
+        // 監聽真實掃描槍輸入 (或鍵盤)
+        const barcodeInput = document.getElementById('barcode-input');
+        if (barcodeInput) {
+            barcodeInput.addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') {
+                    handleScan(this.value.trim());
+                    this.value = '';
+                }
+            });
+        }
+    
+        const attachmentBarcodeInput = document.getElementById('attachment-barcode-input');
+        if (attachmentBarcodeInput) {
+            attachmentBarcodeInput.addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') {
+                    handleAttachmentScan(this.value.trim());
+                    this.value = '';
+                }
+            });
+        }
+    
+        // 保持焦點在隱藏輸入框 (當在掃描頁面時)
+        document.addEventListener('click', function() {
+            if (document.getElementById('step-scan').classList.contains('active')) {
+                document.getElementById('barcode-input').focus();
+            }
+            if (document.getElementById('step-scan-attachment') && document.getElementById('step-scan-attachment').classList.contains('active')) {
+                const input = document.getElementById('attachment-barcode-input');
+                if(input) input.focus();
+            }
+        });
+    
+        // 更新確認頁面的列表
+        function updateBookList() {
+            const list = document.getElementById('scanned-books-list');
+            list.innerHTML = '';
+            
+            scannedBooks.forEach((book, index) => {
+                const li = document.createElement('li');
+                li.className = 'book-item';
+                li.innerHTML = `
+                    <span class="book-index">${index + 1}.</span>
+                    <span class="book-name">${book.title}</span>
+                    <span class="book-author">${book.author}</span>
+                `;
+                list.appendChild(li);
+            });
+        }
+    
+        // 前往投入書籍步驟（會呼叫硬體開門，顯示等待畫面直到完成）
+        async function goToPlaceBookStep(btn) {
+            if (scannedBooks.length === 0) return;
+            if (btn) btn.disabled = true;
+            // 先喚醒並執行 homing，再執行 open，避免因 state4 導致 open 失敗
+            showLoading('喚醒並回原點中，稍候再開啟投書口…');
+            try {
+                // 暫停 status poll 以避免與同步 homing 指令衝突
+                SKIP_STATUS_UNTIL = Date.now() + 10000; // 10 秒內跳過狀態查詢
+                const wakeRes = await fetch('/api/hardware/wake_and_home', { method: 'POST' });
+                const wakeJson = await wakeRes.json().catch(()=>({}));
+                if (!wakeRes.ok || !wakeJson.success) {
+                    hideLoading();
+                    alert(wakeJson.message || '喚醒或回原點失敗，請稍候再試');
+                    return;
+                }
+
+                // 指令完成，清除暫停並更新狀態
+                SKIP_STATUS_UNTIL = 0;
+                checkSystemStatus();
+    
+                // 喚醒並回原點成功，接著開門
+                showLoading('正在開啟投書口，請稍候…');
+                const res = await fetch('/api/hardware/open', { method: 'POST' });
+                const result = await res.json();
+                if (res.ok && result.success) {
+                    hideLoading();
+                    nextStep('step-place-book');
+                } else {
+                    hideLoading();
+                    alert(result.message || '開啟投書口失敗');
+                }
+            } catch (e) {
+                hideLoading();
+                console.error(e);
+                alert('系統錯誤，請稍後再試');
+            } finally {
+                if (btn) setTimeout(() => { try { btn.disabled = false } catch(e){} }, 500);
+            }
+        }
+    
+        function startAutoRedirect() {
+            let seconds = 5;
+            const el = document.getElementById('countdown-sec');
+            if (el) el.textContent = seconds;
+    
+            countdownInterval = setInterval(() => {
+                seconds--;
+                if (el) el.textContent = seconds;
+                if (seconds <= 0) clearInterval(countdownInterval);
+            }, 1000);
+    
+            autoRedirectTimer = setTimeout(() => {
+                resetFlow();
+            }, 5000);
+        }
+    
+        // 確認還書 (最終步驟 - 一般書籍)
+        // 改為在送出還書前確保機器已喚醒並回原點，避免因 state4 卡住導致關門/分類失敗
+        async function finalizeReturn(btn) {
+            if (scannedBooks.length === 0) return;
+            if (btn) btn.disabled = true;
+    
+            const bookIds = scannedBooks.map(b => b.book_id);
+            // 先喚醒並回原點
+            showLoading('喚醒並回原點中，準備關門並處理還書…');
+            try {
+                // 暫停 status poll 以避免與同步 homing 指令衝突
+                SKIP_STATUS_UNTIL = Date.now() + 10000; // 10 秒內跳過狀態查詢
+                const wakeRes = await fetch('/api/hardware/wake_and_home', { method: 'POST' });
+                const wakeJson = await wakeRes.json().catch(()=>({}));
+                if (!wakeRes.ok || !wakeJson.success) {
+                    hideLoading();
+                    alert(wakeJson.message || '喚醒或回原點失敗，請稍候再試');
+                    return;
+                }
+
+                // 指令完成，清除暫停並更新狀態
+                SKIP_STATUS_UNTIL = 0;
+                checkSystemStatus();
+    
+                // 已喚醒並回原點，執行還書 API（關門與檢查由後端處理）
+                showLoading('正在處理還書，請稍候…');
+                const response = await fetch('/api/return', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ book_ids: bookIds })
+                });
+                const result = await response.json();
+    
+                if (result.success) {
+                    hideLoading();
+                    nextStep('step-success');
+                    startAutoRedirect();
+                } else {
+                    hideLoading();
+                    // 如果是書籍未放入的錯誤，後端已重開門，前端需提示使用者
+                    if (result.code === 'BOOK_NOT_DETECTED') {
+                        alert(result.message + "\n\n(投書口已重新開啟，請重新放入)");
+                        // 停留在原步驟，不跳轉，讓使用者可以再次點擊「完成投入」
+                    } else {
+                        alert(result.message || '還書失敗');
+                    }
+                }
+            } catch (e) {
+                hideLoading();
+                console.error(e);
+                alert('系統錯誤');
+            } finally {
+                if (btn) setTimeout(() => { try { btn.disabled = false } catch(e){} }, 500);
+            }
+        }
+    
+        // --- 附件處理流程 ---
+    
+        // 1. 使用者確認先投書 -> 開門 -> 進入投書畫面 (這裡復用 goToPlaceBookStep 邏輯，但要改一下下一步)
+        async function processBookWithAttachment(btn) {
+             if (btn) btn.disabled = true;
+             // 先確保機器已喚醒並回原點，避免 state4 卡住
+             showLoading('喚醒並回原點中，稍候再開啟投書口 (書籍)…');
+             try {
+                const wakeRes = await fetch('/api/hardware/wake_and_home', { method: 'POST' });
+                const wakeJson = await wakeRes.json().catch(()=>({}));
+                if (!wakeRes.ok || !wakeJson.success) {
+                    hideLoading();
+                    alert(wakeJson.message || '喚醒或回原點失敗，請稍候再試');
+                    return;
+                }
+
+                // 指令完成，清除暫停並更新狀態
+                SKIP_STATUS_UNTIL = 0;
+                checkSystemStatus();
+    
+                // 喚醒並回原點成功，開門讓使用者放書
+                showLoading('正在開啟投書口 (書籍)，請稍候…');
+                const res = await fetch('/api/hardware/open', { method: 'POST' });
+                const result = await res.json();
+                if (res.ok && result.success) {
+                    hideLoading();
+                    nextStep('step-place-book');
+                    // 修改按鈕行為，使其觸發 "書籍已投，準備投附件"
+                    const btnInner = document.querySelector('#step-place-book button');
+                    if(btnInner) {
+                        btnInner.onclick = finishBookAndStartAttachment;
+                        btnInner.innerHTML = '<i class="fas fa-arrow-right"></i> 完成書籍投入，下一步';
+                    }
+                } else {
+                    hideLoading();
+                    alert(result.message || '開啟投書口失敗');
+                }
+            } catch (e) {
+                hideLoading();
+                alert('系統錯誤');
+            } finally {
+                if (btn) setTimeout(() => { try { btn.disabled = false } catch(e){} }, 500);
+            }
+        }
+    
+        // 2. 書籍投入完成 -> 關門確認 -> 進入附件掃描 -> 驗證 -> 再開門 -> 提示投附件
+        async function finishBookAndStartAttachment() {
+            if(!currentProcessingBook) return;
+            showLoading('正在處理書籍，準備接收附件…');
+            
+            try {
+                // 先呼叫 return API 歸還本體
+                const response = await fetch('/api/return', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ book_ids: [currentProcessingBook.book_id] })
+                });
+                const result = await response.json();
+                
+                if(!result.success) {
+                    hideLoading();
+                    alert(result.message || '書籍歸還失敗');
+                    resetFlow();
+                    return;
+                }
+    
+                // 書籍歸還成功 (門已關，且已 checkin)
+                hideLoading();
+                
+                // 重置附件條碼暫存
+                currentAttachmentBarcode = null;
+    
+                // 進入附件掃描核對步驟
+                nextStep('step-scan-attachment');
+    
+            } catch (e) {
+                hideLoading();
+                alert('系統錯誤');
+            }
+        }
+    
+        // 2.5 處理附件掃描核對
+        async function handleAttachmentScan(barcode) {
+             if (!barcode) return;
+             if (!currentProcessingBook) return;
+    
+             const statusText = document.getElementById('scan-attachment-status-text');
+             
+             // 簡單核對：掃描的條碼必須與書籍條碼一致
+             if (barcode.trim().toUpperCase() === currentProcessingBook.book_id.trim().toUpperCase()) {
+                 statusText.textContent = '條碼核對成功！準備開啟投書口...';
+                 statusText.style.color = '#2ecc71';
+                 
+                 // 記錄掃描的附件條碼供後端驗證
+                 currentAttachmentBarcode = barcode.trim();
+    
+                 // 核對成功，開啟投書口
+                 await startAttachmentInsertion();
+             } else {
+                 statusText.textContent = '條碼不符！請掃描正確的附件條碼';
+                 statusText.style.color = '#dc3545';
+                 // 清空輸入框
+                 const input = document.getElementById('attachment-barcode-input');
+                 if(input) input.value = '';
+                 
+                 setTimeout(() => {
+                     statusText.textContent = '請掃描附件上的條碼進行核對';
+                     statusText.style.color = 'var(--text-light)';
+                 }, 3000);
+             }
+        }
+    
+        // 2.6 開啟投書口供附件投入
+        async function startAttachmentInsertion() {
+             // 先喚醒並回原點，確保能安全開門接收附件
+             showLoading('喚醒並回原點中，稍候再開啟投書口 (附件)…');
+             try {
+                 // 暫停 status poll 以避免與同步 homing 指令衝突
+                 SKIP_STATUS_UNTIL = Date.now() + 10000; // 10 秒內跳過狀態查詢
+                 const wakeRes = await fetch('/api/hardware/wake_and_home', { method: 'POST' });
+                 const wakeJson = await wakeRes.json().catch(()=>({}));
+                 if (!wakeRes.ok || !wakeJson.success) {
+                     hideLoading();
+                     alert(wakeJson.message || '喚醒或回原點失敗，請稍候再試');
+                     nextStep('step-success');
+                     return;
+                 }
+
+                 // 指令完成，清除暫停並更新狀態
+                 SKIP_STATUS_UNTIL = 0;
+                 checkSystemStatus();
+    
+                 // 稍微延遲讓使用者看到成功訊息
+                 setTimeout(async () => {
+                     try {
+                         const res = await fetch('/api/hardware/open', { method: 'POST' });
+                         const result = await res.json();
+                         if (res.ok && result.success) {
+                            hideLoading();
+                            nextStep('step-insert-attachment');
+                         } else {
+                            hideLoading();
+                            alert(result.message || '開啟投書口失敗');
+                            // 即使失敗，也許應該允許重試或結束
+                            alert('無法開啟投書口接收附件，請洽櫃台');
+                            nextStep('step-success');
+                         }
+                     } catch (e) {
+                        hideLoading();
+                        alert('系統錯誤');
+                        nextStep('step-success');
+                     }
+                 }, 1000);
+             } catch (e) {
+                 hideLoading();
+                 alert('系統錯誤，請稍後再試');
+                 nextStep('step-success');
+             }
+        }
+    
+        // 3. 附件投入完成 -> 關門 -> 結束
+        async function finalizeAttachmentReturn(btn) {
+             if(!currentProcessingBook) return;
+             if(!currentAttachmentBarcode) {
+                 alert('尚未掃描附件條碼，請先掃描以便核對');
+                 return;
+             }
+             if (btn) btn.disabled = true;
+             showLoading('正在處理附件，請稍候…');
+   
+             try {
+                // 再次呼叫 return API，但標記為附件 (後端僅記錄或再次 checkin)
+                const response = await fetch('/api/return', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        book_ids: [currentProcessingBook.book_id],
+                        attachment_only: true,
+                        attachment_barcode: currentAttachmentBarcode
+                    })
+                });
+                const result = await response.json();
+    
+                if(result.success) {
+                    hideLoading();
+                    // 清除暫存
+                    currentAttachmentBarcode = null;
+                    currentProcessingBook = null;
+                    nextStep('step-success');
+                    startAutoRedirect();
+                } else {
+                    hideLoading();
+                    alert(result.message || '附件處理異常，但書籍已歸還。');
+                    nextStep('step-success');
+                }
+             } catch(e) {
+                 hideLoading();
+                 alert('系統錯誤');
+                 nextStep('step-success');
+             } finally {
+                 if (btn) setTimeout(() => { try { btn.disabled = false } catch(e){} }, 500);
+             }
+        }
+    
+        // 定期檢查系統狀態（包含圖書館與機器通訊）
+        function checkSystemStatus() {
+            // 若剛剛觸發了會佔用 serial 的長指令（例如 homing），skip poll 以避免衝突
+            if (Date.now() < SKIP_STATUS_UNTIL) return;
+            fetch('/api/status')
+                .then(response => response.json())
+                .then(data => {
+                    const overlay = document.getElementById('suspended-overlay');
+                    if (overlay) overlay.style.display = data.suspended ? 'flex' : 'none';
+    
+                    // 更新圖書館 / 機器狀態顯示（更細緻：使用 machine_state / homing_in_progress / is_homed）
+                    try {
+                        const libDot = document.getElementById('lib-dot');
+                        const libText = document.getElementById('lib-text');
+                        const machDot = document.getElementById('machine-dot');
+                        const machText = document.getElementById('machine-text');
+    
+                        // 圖書館連線狀態
+                        if (data.library_ok) {
+                            libDot.style.backgroundColor = '#2ecc71';
+                            libText.textContent = '可用';
+                        } else {
+                            libDot.style.backgroundColor = '#dc3545';
+                            libText.textContent = '連線失敗';
+                        }
+    
+                        // 依 machine_state 與 homing flag 更新機器顯示（優先使用 machine_state）
+                        const state = (data.machine_state || '').toLowerCase();
+                        const homingFlag = !!data.homing_in_progress;
+                        const isHomed = !!data.is_homed;
+    
+                        if (state === 'sleeping' || state === 'unavailable') {
+                            machDot.style.backgroundColor = '#6c757d';
+                            machText.textContent = state === 'sleeping' ? '休眠' : '不可用';
+                        } else if (state === 'homing' || homingFlag) {
+                            machDot.style.backgroundColor = '#ffcc00';
+                            machText.textContent = '回原點中';
+                        } else if (state === 'homed' || isHomed) {
+                            machDot.style.backgroundColor = '#2ecc71';
+                            machText.textContent = '就緒';
+                        } else if (state === 'opened') {
+                            machDot.style.backgroundColor = '#007bff';
+                            machText.textContent = '投書口開啟';
+                        } else if (state === 'closed') {
+                            machDot.style.backgroundColor = '#ffc107';
+                            machText.textContent = '投書口關閉';
+                        } else {
+                            // fallback：使用 machine_ok 判斷
+                            if (data.machine_ok) {
+                                machDot.style.backgroundColor = '#2ecc71';
+                                machText.textContent = '就緒';
+                            } else {
+                                machDot.style.backgroundColor = '#dc3545';
+                                machText.textContent = '離線';
+                            }
+                        }
+    
+                        // 額外提示：若正在 homing 則在 title 顯示進度提示，否則清除
+                        if (homingFlag) {
+                            machText.title = '機器正在回原點，請稍候...';
+                        } else {
+                            machText.title = '';
+                        }
+                    } catch (e) {
+                        console.error('Update status UI failed', e);
+                    }
+                })
+                .catch(err => console.error('Status check failed', err));
+        }
+    
+        // 當有人點擊螢幕時喚醒機器（節流 30 秒）
+        (function(){
+            let lastWake = 0;
+            const WAKE_THROTTLE_MS = 30000;
+            function tryWake() {
+                const now = Date.now();
+                if (now - lastWake < WAKE_THROTTLE_MS) return;
+                lastWake = now;
+                fetch('/api/hardware/wake', { method: 'POST' })
+                    .then(r => r.json().catch(()=>{}))
+                    .catch(()=>{});
+            }
+            // 對主要互動事件監聽（點擊、觸控、鍵盤）
+            document.addEventListener('click', tryWake);
+            document.addEventListener('touchstart', tryWake);
+            document.addEventListener('keypress', tryWake);
+        })();
+    
+        // 每 5 秒檢查一次
+        setInterval(checkSystemStatus, 5000);
+    </script>

@@ -9,6 +9,7 @@ from logging.handlers import TimedRotatingFileHandler
 import json
 from pathlib import Path
 import yaml
+import sys
 
 # 讀取 config.yml（若存在）
 CONFIG_FILE = Path('config.yml')
@@ -23,7 +24,9 @@ if CONFIG_FILE.exists():
 LOG_BACKUP_DAYS = int(cfg.get('logs', {}).get('backup_days', 30))
 
 # 日誌：每日一檔，分四種類別並保留 LOG_BACKUP_DAYS（app / machine / library / frontend）
-LOG_DIR = Path('logs')
+# 設定為相對於 app.py 的絕對路徑，避免因執行目錄不同導致 log 散落
+BASE_DIR = Path(__file__).resolve().parent
+LOG_DIR = BASE_DIR / 'logs'
 LOG_DIR.mkdir(exist_ok=True)
 
 LOG_BACKUP_DAYS = int(cfg.get('logs', {}).get('backup_days', 30))
@@ -61,6 +64,12 @@ frontend_logger.addHandler(frontend_handler)
 logging.root.setLevel(logging.INFO)
 logging.root.addHandler(app_handler)
 
+# Also log to console/stdout for immediate visibility during development
+console_h = logging.StreamHandler(sys.stdout)
+console_h.setLevel(logging.DEBUG)
+console_h.setFormatter(logging.Formatter('%(asctime)s %(levelname)s %(name)s: %(message)s'))
+logging.root.addHandler(console_h)
+
 logger = logging.getLogger(__name__)
 
 # 引入控制器
@@ -84,28 +93,91 @@ REQUIRE_ADMIN_LOGIN = cfg.get('require_admin_login', False)
 MAX_RETURN_LIMIT = int(cfg.get('max_return_limit', 20))
 
 # 初始化機器：以 config.yml 的設定建立新的 MachineController 實例
-# 優先使用 cfg['machine'].get('mock_mode')，向後相容 top-level cfg['mock_mode']
 machine_cfg = cfg.get('machine', {})
-mock_mode = bool(machine_cfg.get('mock_mode', cfg.get('mock_mode', False)))
-# 建立實例（MachineController 內部會在沒有 pyserial 時自動 fallback 為 mock）
-machine = MachineController(mock_mode=mock_mode)
-machine.init_machine()
+# 優先讀取 machine_config.json (使用者透過介面設定的)
+MACHINE_CONFIG_FILE = Path('machine_config.json')
+port = machine_cfg.get('port', '/dev/uno')
+baudrate = machine_cfg.get('baudrate', 38400)
+
+try:
+    if MACHINE_CONFIG_FILE.exists():
+        mc_cfg = json.loads(MACHINE_CONFIG_FILE.read_text(encoding='utf-8'))
+        port = mc_cfg.get('port', port)
+        baudrate = int(mc_cfg.get('baudrate', baudrate))
+except Exception as e:
+    logger.warning(f"Failed to read machine_config.json: {e}")
+
+# 建立實例
+machine = MachineController(port=port, baudrate=baudrate)
+
+def init_machine_async():
+    """背景初始化機器，避免阻塞 Server 啟動"""
+    try:
+        logger.info("Starting machine initialization in background...")
+        machine.init_machine()
+        logger.info("Machine initialization completed.")
+    except Exception as e:
+        logger.error(f"Machine initialization failed: {e}")
+
+# Move initialization to background thread to avoid blocking server startup
+init_thread = threading.Thread(target=init_machine_async, daemon=True)
+init_thread.start()
 
 # 初始化 SIP2 Client
-USE_MOCK_SIP2 = True # 強制使用 Mock 模式
-SIP2_CONFIG = {
-    'host': '192.168.1.100',
-    'port': 6001,
-    'login_user': '', # 使用者名稱為空 (跳過登入)
-    'login_pass': ''  # 密碼為空
-}
+# 從 config.py 讀取設定
+import config as global_config
 
-if USE_MOCK_SIP2:
-    sip2 = MockSIP2Client(**SIP2_CONFIG)
-else:
-    sip2 = SIP2Client(**SIP2_CONFIG)
-    sip2.connect()
-    sip2.login()
+def init_sip2_client():
+    """根據全域設定初始化 SIP2 Client"""
+    global sip2
+    # 這裡我們使用 config.py 內的變數
+    # 注意：若未來希望完全不重啟 app 就能換 IP，需要讓 SIP2Client 支援動態重連，
+    # 或者在這裡重新實例化。這裡採用「重新實例化」的方式。
+    
+    # 簡單判斷：如果 IP 是 127.0.0.1 或 localhost 且 port 是測試用，可能走 Mock?
+    # 目前維持原本邏輯：預設 Mock，除非有明確設定要走真實連線。
+    # 但使用者的需求是「動態加載」，所以我們應該預設使用真實 Client (或具備切換能力)
+    # 這裡為了展示，我們先預設 "若 host 為 'mock' 則用 MockClient，否則用真 Client"
+    
+    host = global_config.LIBRARY_HOST
+    port = global_config.LIBRARY_PORT
+    
+    # 若未啟用登入，傳空字串給 Client (Client 會改用無帳密 login 模式)
+    if global_config.LIBRARY_LOGIN_ENABLED:
+        user = global_config.LIBRARY_USER
+        pwd = global_config.LIBRARY_PASS
+    else:
+        user = ""
+        pwd = ""
+        
+    inst = global_config.LIBRARY_INSTITUTION
+    
+    logger.info(f"Initializing SIP2 Client: {host}:{port}, Inst={inst}, Login={global_config.LIBRARY_LOGIN_ENABLED}")
+    
+    if host.lower() == 'mock':
+        sip2 = MockSIP2Client(host, port, user, pwd, institution_id=inst)
+    else:
+        # 真實連線
+        try:
+             # 如果舊的有連線，先關閉
+            if 'sip2' in globals() and sip2:
+                try: sip2.close()
+                except: pass
+            
+            sip2 = SIP2Client(host, port, user, pwd, institution_id=inst)
+            # 嘗試連線 (非阻塞，失敗就之後由各個 API call 自己重連)
+            # 但為了開機檢查，我們試著連一次
+            if sip2.connect():
+                sip2.login()
+        except Exception as e:
+            logger.error(f"Failed to init SIP2 client: {e}")
+            # Fallback to a safe state or Mock if critical?
+            # For now, we keep the object but it might be unconnected.
+            pass
+
+# 初次執行
+sip2 = None
+init_sip2_client()
 
 # 本地還書箱資料庫 (只記錄還書箱內的物品)
 BOX_DB_FILE = 'return_box.db'
@@ -191,7 +263,7 @@ def admin():
 
 @app.route('/api/status')
 def get_status():
-    """檢查系統狀態（包含圖書館與機器通訊）"""
+    """檢查系統狀態（包含圖書館與機器通訊），並回傳可讀的機器狀態字串與 homing 標記。"""
     suspended = is_box_full()
     limit = MAX_RETURN_LIMIT
 
@@ -209,40 +281,67 @@ def get_status():
 
     # 檢查機器通訊
     machine_ok = False
-    machine_debug = {"mock_mode": False, "ser_open": False, "type": None}
+    machine_debug = {"ser_open": False, "type": None}
+    machine_state = "unknown"
+    homing_in_progress = False
+    is_homed = False
+
     try:
         machine_debug["type"] = type(machine).__name__ if machine is not None else None
-        # 1) 如果明確為 mock mode，直接視為可用
-        if getattr(machine, 'mock_mode', False):
-            machine_ok = True
-            machine_debug["mock_mode"] = True
-        else:
-            ser = getattr(machine, 'ser', None)
-            ser_open = bool(ser and getattr(ser, 'is_open', False))
-            machine_ok = ser_open
-            machine_debug["ser_open"] = ser_open
+        ser = getattr(machine, 'ser', None)
+        ser_open = bool(ser and getattr(ser, 'is_open', False))
+        machine_ok = ser_open
+        machine_debug["ser_open"] = ser_open
 
-        # 2) 若仍未判定為可用，嘗試用 get_status() 快速檢查（非侵入式）
-        if not machine_ok and hasattr(machine, 'get_status'):
-            try:
-                resp = machine.get_status()
-                if resp:
-                    # 在 mock 模式下回傳 '2'，實機回傳也會有內容 -> 視為可用
-                    machine_ok = True
-                    # 若回傳是字串數字，標記 mock_mode 相關資訊
-                    if isinstance(resp, str) and resp.strip().isdigit():
-                        machine_debug["mock_mode_guess_from_state"] = True
-            except Exception as e:
-                logger.debug(f"status probe get_status failed: {e}")
+        # 讀取機器內部狀態標記（若有）
+        try:
+            homing_in_progress = bool(getattr(machine, 'homing_in_progress', False))
+            is_homed = bool(getattr(machine, 'is_homed', False))
+        except Exception:
+            homing_in_progress = False
+            is_homed = False
+
+        # 決定可讀狀態優先順序
+        if machine is None:
+            machine_state = "unavailable"
+        elif getattr(machine, 'is_sleeping', False):
+            machine_state = "sleeping"
+        elif homing_in_progress:
+            machine_state = "homing"
+        elif is_homed:
+            machine_state = "homed"
+        else:
+            # 嘗試解析 get_status 的回應以判斷狀態
+            if hasattr(machine, 'get_status'):
+                try:
+                    resp = machine.get_status() or ""
+                    low = str(resp).lower()
+                    if "open" in low or "opened" in low:
+                        machine_state = "opened"
+                    elif "closed" in low:
+                        machine_state = "closed"
+                    elif "power on" in low or "dep1" in low:
+                        machine_state = "power_on_not_homed"
+                    elif "homed" in low or "ack" in low:
+                        machine_state = "homed"
+                    else:
+                        machine_state = "ready"
+                except Exception as e:
+                    logger.debug(f"status probe get_status failed: {e}")
+                    machine_state = "unknown"
     except Exception as e:
         logger.error(f"status check machine error: {e}")
         machine_ok = False
+        machine_state = "error"
 
     return jsonify({
         "suspended": suspended,
         "limit": limit,
         "library_ok": library_ok,
         "machine_ok": machine_ok,
+        "machine_state": machine_state,
+        "homing_in_progress": homing_in_progress,
+        "is_homed": is_homed,
         "machine_debug": machine_debug
     })
 
@@ -354,7 +453,32 @@ def return_book():
     current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
     # 硬體還書流程控制
-    # 1. 關閉投書口 (因為在進入此步驟前，前端已經呼叫 /api/hardware/open 開門讓使用者放書)
+    # 1. 確保機器處於可執行關門/檢查的狀態（若尚未 homed，嘗試同步 homing）
+    try:
+        homed = bool(getattr(machine, 'is_homed', False))
+        if not homed:
+            logger.info("Machine not homed before close; attempting synchronous homing...")
+            try:
+                resp = machine._send_command("homing")
+                logger.info(f"Homing before return response: {resp}")
+                homed = ("homed" in str(resp).lower()) or ("ack" in str(resp).lower())
+                machine.is_homed = bool(homed)
+            except Exception as e:
+                logger.warning(f"Homing before return failed to send: {e}")
+                homed = False
+
+        if not homed:
+            logger.warning("Homing before close did not confirm; aborting return to avoid state errors")
+            return jsonify({
+                "success": False,
+                "message": "機器尚未準備好（homing 失敗），請稍後再試或通知管理員",
+                "code": "MACHINE_NOT_READY"
+            }), 503
+    except Exception as e:
+        logger.error(f"Pre-close homing check failed: {e}")
+        return jsonify({"success": False, "message": "機器狀態檢查失敗"}), 500
+
+    # 2. 關閉投書口（前端應已開門並使用者放入）
     machine.close_door()
     time.sleep(1) # 等待門關閉
 
@@ -603,10 +727,43 @@ def wake_hardware():
         logger.error(f"wake_hardware error: {e}")
         return jsonify({"success": False, "message": "喚醒失敗"}), 500
 
+@app.route('/api/hardware/wake_and_home', methods=['POST'])
+def wake_and_home():
+    """喚醒機器並同步執行 homing（回原點），僅在 homing 成功時回傳 success。"""
+    try:
+        if not hasattr(machine, 'wake_up'):
+            return jsonify({"success": False, "message": "機器不支援喚醒操作"}), 501
+
+        # 先喚醒（非阻塞喚醒，機器物件會在內部啟動非同步 homing 或設定旗標）
+        machine.wake_up()
+
+        # 嘗試同步執行 homing，使用 _send_command 以取得明確回應
+        try:
+            resp = machine._send_command("homing")
+        except Exception as e:
+            logger.warning(f"wake_and_home: homing command failed: {e}")
+            return jsonify({"success": False, "message": "homing 指令發送失敗", "detail": str(e)}), 500
+
+        ok = False
+        try:
+            ok = ("homed" in str(resp).lower()) or ("ack" in str(resp).lower())
+        except Exception:
+            ok = False
+
+        if ok:
+            return jsonify({"success": True, "message": "已喚醒並回原點", "response": resp})
+        else:
+            logger.warning(f"wake_and_home: homing did not confirm, resp={resp}")
+            return jsonify({"success": False, "message": "homing 未確認", "response": resp}), 500
+
+    except Exception as e:
+        logger.error(f"wake_and_home error: {e}")
+        return jsonify({"success": False, "message": "喚醒並回原點失敗", "detail": str(e)}), 500
+
 # 移除 get_books 因為改用 SIP2
 
-if __name__ == '__main__':
-    app.run(debug=True, port=5000)
+# Removed inline app.run here so all routes defined before server start.
+# The server will be started at the bottom of the file (after all routes) to avoid 404 for routes added later.
 @app.route('/api/admin/send_command', methods=['POST'])
 def admin_send_command():
     """管理員發送單一機器指令供驗證（僅供測試，需管理員登入）"""
@@ -643,6 +800,30 @@ def get_uart():
         return jsonify({"success": False, "message": "讀取設定失敗"}), 500
 
 
+@app.route('/api/admin/test_uart', methods=['POST'])
+def test_uart():
+    """測試機器 UART 連線 (不儲存)"""
+    if REQUIRE_ADMIN_LOGIN and not session.get('logged_in'):
+        return jsonify({"success": False, "message": "未登入"}), 401
+    
+    data = request.json or {}
+    port = data.get('port')
+    baud = data.get('baudrate')
+    
+    if not port or baud is None:
+        return jsonify({"success": False, "message": "參數缺失"}), 400
+        
+    try:
+        baud = int(baud)
+        success, msg = machine.test_connection(port, baud)
+        if success:
+             return jsonify({"success": True, "message": f"測試連線成功 ({port}, {baud})"})
+        else:
+             return jsonify({"success": False, "message": f"測試連線失敗: {msg}"})
+    except Exception as e:
+        logger.error(f"test_uart error: {e}")
+        return jsonify({"success": False, "message": f"測試例外錯誤: {e}"}), 500
+
 @app.route('/api/admin/set_uart', methods=['POST'])
 def set_uart():
     """設定機器 UART（會寫入 machine_config.json 並嘗試重新連線）"""
@@ -676,3 +857,128 @@ def set_uart():
     except Exception as e:
         logger.error(f"set_uart error: {e}")
         return jsonify({"success": False, "message": "設定失敗"}), 500
+
+@app.route('/api/admin/get_library_config', methods=['GET'])
+def get_library_config():
+    """取得圖書館連線設定"""
+    if REQUIRE_ADMIN_LOGIN and not session.get('logged_in'):
+        return jsonify({"success": False, "message": "未登入"}), 401
+    
+    # 重新讀取 config 以確保最新
+    global_config.reload_config()
+    
+    return jsonify({
+        "success": True,
+        "config": {
+            "host": global_config.LIBRARY_HOST,
+            "port": global_config.LIBRARY_PORT,
+            "login_enabled": global_config.LIBRARY_LOGIN_ENABLED,
+            "login_user": global_config.LIBRARY_USER,
+            # 密碼不回傳明碼，或回傳遮罩
+            "login_pass": "********" if global_config.LIBRARY_PASS else "",
+            "institution_id": global_config.LIBRARY_INSTITUTION
+        }
+    })
+
+@app.route('/api/admin/set_library_config', methods=['POST'])
+def set_library_config():
+    """設定圖書館連線設定 (寫入 config.yml 並重載)"""
+    if REQUIRE_ADMIN_LOGIN and not session.get('logged_in'):
+        return jsonify({"success": False, "message": "未登入"}), 401
+
+    data = request.json or {}
+    host = data.get('host')
+    port = data.get('port')
+    login_enabled = data.get('login_enabled', False)
+    user = data.get('login_user')
+    pwd = data.get('login_pass')
+    inst = data.get('institution_id')
+
+    if not host or not port:
+         return jsonify({"success": False, "message": "Host 與 Port 為必填"}), 400
+
+    try:
+        # 1. 讀取現有 config.yml
+        current_conf = {}
+        if CONFIG_FILE.exists():
+            current_conf = yaml.safe_load(CONFIG_FILE.read_text(encoding='utf-8')) or {}
+        
+        # 2. 更新 library 區塊
+        lib_conf = current_conf.get('library', {})
+        lib_conf['host'] = host
+        lib_conf['port'] = int(port)
+        lib_conf['login_enabled'] = bool(login_enabled)
+        lib_conf['login_user'] = user or ""
+        # 如果密碼欄位是遮罩 (********) 且沒變更，就不更新密碼
+        if pwd and pwd != "********":
+            lib_conf['login_pass'] = pwd
+        elif pwd == "": # 如果使用者刻意清空
+             lib_conf['login_pass'] = ""
+             
+        lib_conf['institution_id'] = inst or "MAIN"
+        
+        current_conf['library'] = lib_conf
+        
+        # 3. 寫回 config.yml
+        CONFIG_FILE.write_text(yaml.dump(current_conf, allow_unicode=True), encoding='utf-8')
+        
+        # 4. Reload config in memory
+        global_config.reload_config()
+        
+        # 5. Re-init SIP2 Client
+        init_sip2_client()
+        
+        return jsonify({"success": True, "message": "圖書館設定已更新並嘗試重新連線"})
+        
+    except Exception as e:
+        logger.error(f"set_library_config error: {e}")
+        return jsonify({"success": False, "message": f"設定失敗: {e}"}), 500
+
+@app.route('/api/admin/test_library_conn', methods=['POST'])
+def test_library_conn():
+    """測試圖書館連線 (使用當前送來的設定，不儲存)"""
+    if REQUIRE_ADMIN_LOGIN and not session.get('logged_in'):
+        return jsonify({"success": False, "message": "未登入"}), 401
+        
+    data = request.json or {}
+    host = data.get('host')
+    port = data.get('port')
+    login_enabled = data.get('login_enabled', False)
+    user = data.get('login_user')
+    pwd = data.get('login_pass')
+    inst = data.get('institution_id')
+    
+    # 決定是否使用帳密
+    if not login_enabled:
+        user = ""
+        pwd = ""
+    else:
+        # 處理遮罩密碼：如果密碼是 ********，則使用目前的設定值
+        if pwd == "********":
+            pwd = global_config.LIBRARY_PASS
+
+    if not host or not port:
+         return jsonify({"success": False, "message": "Host 與 Port 為必填"}), 400
+         
+    try:
+        if host.lower() == 'mock':
+             return jsonify({"success": True, "message": "Mock 連線測試成功"})
+             
+        test_client = SIP2Client(host, int(port), user, pwd, institution_id=inst)
+        if test_client.connect():
+            login_ok = test_client.login()
+            test_client.close()
+            
+            if login_ok:
+                return jsonify({"success": True, "message": f"連線與登入成功 ({host}:{port})"})
+            else:
+                return jsonify({"success": False, "message": f"連線成功但登入失敗 (Check User/Pass/AO)"})
+        else:
+             return jsonify({"success": False, "message": f"無法建立連線 ({host}:{port})"})
+             
+    except Exception as e:
+        return jsonify({"success": False, "message": f"測試例外: {e}"}), 500
+
+if __name__ == '__main__':
+    # Start without the reloader to avoid duplicate processes and ensure console logs appear in this process.
+    app.run(debug=False, use_reloader=False, port=5000)
