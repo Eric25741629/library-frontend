@@ -23,8 +23,8 @@
     <div id="loading-overlay" class="suspended-overlay" style="display:none; align-items:center; justify-content:center;">
         <div class="suspended-content">
             <div class="spinner-border"></div>
-            <h2>加載中，請稍等</h2>
-            <p id="loading-message" style="margin-top:0.5rem;"></p>
+            <h2 id="loading-title">處理中，請稍候</h2>
+            <p id="loading-message" style="margin-top:0.5rem;">請勿將手伸入還書口，以免受傷</p>
         </div>
     </div>
 
@@ -69,8 +69,8 @@
             
             <p class="scan-status" id="scan-status-text">系統就緒，請掃描書籍條碼</p>
 
-            <!-- 真實掃描輸入框 -->
-            <input type="text" id="barcode-input" class="barcode-input-field" placeholder="游標請停留在這並掃描..." autocomplete="off" autofocus>
+            <!-- 真實掃描輸入框：移除 readonly 以允許輸入，但使用 inputmode="none" 降低虛擬鍵盤彈出 -->
+            <input type="text" id="barcode-input" class="barcode-input-field" placeholder="請使用掃描器或實體鍵盤掃描" autocomplete="off" inputmode="none" tabindex="-1">
 
             <div class="action-buttons">
                 <button class="btn-danger btn-medium" onclick="resetFlow(this)">
@@ -162,8 +162,11 @@
             </div>
 
             <div class="action-buttons">
-                <button class="btn-primary btn-large btn-pulse" onclick="finalizeReturn(this)">
+                <button type="button" class="btn-primary btn-large btn-pulse" onclick="finalizeReturn(this)">
                     <i class="fas fa-check"></i> 完成投入
+                </button>
+                <button type="button" class="btn-danger btn-large" onclick="openCancelConfirmModal(this)" style="margin-left:12px;">
+                    <i class="fas fa-times"></i> 取消還書
                 </button>
             </div>
         </section>
@@ -253,6 +256,22 @@
 
     </main>
 
+    <!-- 取消還書確認彈窗 -->
+    <div id="cancel-confirm-modal" class="suspended-overlay" style="display:none; align-items:center; justify-content:center; z-index:10001;">
+        <div class="suspended-content" style="max-width:760px; padding: 2rem; border-radius:12px; text-align:center; background:rgba(255,255,255,0.96); color:var(--text-dark);">
+            <h2 style="color:var(--danger-red); margin-bottom:0.5rem;"><i class="fas fa-exclamation-triangle"></i> 取消還書確認</h2>
+            <p style="font-size:1.1rem; color:#444; margin-bottom:1rem;">請確認您尚未將書籍放入還書箱內部。若書本已放入，取消操作可能造成誤分櫃或遺失。</p>
+            <div style="display:flex; justify-content:center; gap:12px;">
+                <button class="btn-danger btn-medium" onclick="confirmCancel()" style="min-width:180px;">
+                    <i class="fas fa-lock"></i> 開始關門並返回首頁
+                </button>
+                <button class="btn-secondary btn-medium" onclick="hideCancelModal()" style="min-width:120px;">
+                    <i class="fas fa-times"></i> 我還要檢查
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- Footer -->
     <footer class="main-footer">
         <div class="footer-left">
@@ -278,6 +297,44 @@
         let currentProcessingBook = null; // 當前正在處理含附件的書籍
         let currentAttachmentBarcode = null; // 已掃描的附件條碼（送至後端驗證）
         
+        // 當觸發 homing（wake_and_home）或其他會佔用 serial 的長時間指令時，
+        // 我們暫停 /api/status 的輪詢以避免與機器指令衝突。
+        // SKIP_STATUS_UNTIL 存放取樣暫停到的時間（ms since epoch）。
+        let SKIP_STATUS_UNTIL = 0;
+
+        /*
+          Helper: 只在必要時執行喚醒並回原點 (wake_and_home)
+          - 若 /api/status 回傳機器已就緒 (is_homed 且非 sleeping)，則跳過 wake_and_home。
+          - 否則呼叫 /api/hardware/wake_and_home 並回傳結果。
+          回傳格式:
+            { skipped: true, status }                // 已就緒，跳過
+            { skipped: false, error: true, resp }    // 呼叫失敗或例外
+            { skipped: false, error: false, resp, respFetchResult } // 呼叫成功 (resp: parsed json)
+        */
+        async function ensureAwakeAndHomedIfNeeded() {
+            try {
+                const statusResp = await fetch('/api/status').then(r => r.json()).catch(()=>null);
+                if (statusResp && statusResp.is_homed && !statusResp.homing_in_progress && statusResp.machine_state !== 'sleeping' && statusResp.machine_state !== 'unavailable') {
+                    return { skipped: true, status: statusResp };
+                }
+        
+                // 需要喚醒並回原點：設定短暫跳過狀態輪詢，執行 API
+                SKIP_STATUS_UNTIL = Date.now() + 10000;
+                const res = await fetch('/api/hardware/wake_and_home', { method: 'POST' });
+                const j = await res.json().catch(()=>null);
+                if (!res.ok) {
+                    // 清除暫停旗標，讓前端能立即看到最新狀態
+                    SKIP_STATUS_UNTIL = 0;
+                    return { skipped: false, error: true, resp: j, respFetchResult: res };
+                }
+                SKIP_STATUS_UNTIL = 0;
+                return { skipped: false, error: false, resp: j, respFetchResult: res };
+            } catch (e) {
+                SKIP_STATUS_UNTIL = 0;
+                return { skipped: false, error: true, resp: String(e) };
+            }
+        }
+
         // 更新時間
         function updateTime() {
             const now = new Date();
@@ -338,7 +395,23 @@
         function showLoading(message) {
             const overlay = document.getElementById('loading-overlay');
             const msg = document.getElementById('loading-message');
-            if (msg) msg.textContent = message || '';
+            const title = document.getElementById('loading-title');
+            
+            // 若有自訂訊息則顯示，否則顯示預設的安全警語
+            const text = message || '請不要將手放在開門的地方';
+            if (msg) msg.textContent = text;
+            
+            // 根據訊息內容自動調整標題
+            if (title) {
+                if (text.includes('開門')) {
+                    title.textContent = '開門中，請稍後';
+                } else if (text.includes('關門')) {
+                    title.textContent = '關門中，請稍後';
+                } else {
+                    title.textContent = '處理中，請稍後';
+                }
+            }
+            
             if (overlay) overlay.style.display = 'flex';
         }
 
@@ -346,6 +419,7 @@
             const overlay = document.getElementById('loading-overlay');
             if (overlay) overlay.style.display = 'none';
         }
+        // 兼容 wrapper：若 partials 中有實作，亦可覆寫 window.__rb_showLoading
 
         let autoRedirectTimer;
         let countdownInterval;
@@ -354,15 +428,20 @@
             // 若有按鈕來源，避免重複點擊
             if (btn) btn.disabled = true;
             // 嘗試喚醒並回原點，確保機器回到標準狀態，避免殘留 state4
-            showLoading('正在回原點，稍候…');
+            showLoading('機器啟動中 請稍後');
             try {
-                const res = await fetch('/api/hardware/wake_and_home', { method: 'POST' });
-                // 若 homing 失敗，也不要阻塞使用者太久，只記錄並提示
-                if (!res.ok) {
-                    const j = await res.json().catch(()=>({}));
+                // 確認是否需要喚醒並回原點
+                const wakeResult = await ensureAwakeAndHomedIfNeeded();
+                if (wakeResult.error) {
+                    const j = wakeResult.resp || {};
                     console.warn('wake_and_home failed', j);
-                    // 可選：顯示短暫提示但仍重置介面
-                    alert(j.message || '機器回原點失敗，請通知管理員。');
+                    alert((j && j.message) || '機器回原點失敗，請通知管理員。');
+                } else if (wakeResult.skipped) {
+                    // 已就緒、跳過 wake_and_home
+                    checkSystemStatus();
+                } else {
+                    // 已執行 wake_and_home 並成功返回
+                    checkSystemStatus();
                 }
             } catch (e) {
                 console.error('wake_and_home request error', e);
@@ -458,16 +537,77 @@
             }
         }
 
-        // 監聽真實掃描槍輸入 (或鍵盤)
-        const barcodeInput = document.getElementById('barcode-input');
-        if (barcodeInput) {
-            barcodeInput.addEventListener('keypress', function(e) {
-                if (e.key === 'Enter') {
-                    handleScan(this.value.trim());
-                    this.value = '';
+        // 採用全域鍵盤監聽以支援條碼掃描器（避免虛擬鍵盤彈出）
+        // 規則：若使用者正專注於文字輸入（輸入框或 textarea），則不截取。
+        // 否則以快速連續按鍵視為掃描器輸入；按下 Enter 時送出 barcode。
+        (function(){
+            let scanBuffer = '';
+            let lastCharTime = 0;
+            const SCAN_INTERVAL_MS = 200; // 放寬時間間隔以允許手動鍵盤輸入 (原 80ms)
+            
+            document.addEventListener('keydown', function(e) {
+                const active = document.activeElement;
+                // 若正在輸入一般文字（非 barcode-input），不攔截
+                if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable)) {
+                    if (active.id !== 'barcode-input' && active.id !== 'attachment-barcode-input') {
+                        return;
+                    }
                 }
-            });
-        }
+
+                const now = Date.now();
+                if (e.key === 'Enter') {
+                    // 優先處理 buffer 中的內容
+                    if (scanBuffer.length > 0) {
+                        handleScan(scanBuffer.trim());
+                        scanBuffer = '';
+                        // 若焦點在 input 上，也清空它以免重複送出
+                        if (active && active.id === 'barcode-input') {
+                            active.value = '';
+                        }
+                    } else if (active && active.id === 'barcode-input' && active.value.trim().length > 0) {
+                        // 若 buffer 空但 input 有值（手動輸入情況），從 input 讀取
+                        handleScan(active.value.trim());
+                        active.value = '';
+                    }
+                    lastCharTime = 0;
+                    return;
+                }
+
+                // 累積字元
+                if (e.key.length === 1) {
+                    // 若是手動輸入，時間間隔可能會較長，我們放寬判定
+                    // 為了同時支援掃描器與鍵盤，這裡不再嚴格檢查 INTERVAL，而是累積直到 Enter
+                    // 但為了避免誤觸，若間隔過久可視為新輸入
+                    if (now - lastCharTime > 5000) { // 5秒超時重置
+                        scanBuffer = e.key;
+                    } else {
+                        scanBuffer += e.key;
+                    }
+                    lastCharTime = now;
+                }
+            }, true);
+
+            // 另外保留對隱藏輸入框的回退監聽（若真的需要）
+            const barcodeInput = document.getElementById('barcode-input');
+            if (barcodeInput) {
+                // 聚焦時允許輸入，方便測試
+                barcodeInput.addEventListener('focus', () => {
+                    // 移除 readonly 屬性（如果在 HTML 中被設定了）
+                    barcodeInput.removeAttribute('readonly');
+                });
+                
+                barcodeInput.addEventListener('keypress', function(e) {
+                    if (e.key === 'Enter') {
+                        // 這裡可能會與全域 Enter 重複，加個防呆或依賴全域清空
+                        if (this.value.trim().length > 0) {
+                            handleScan(this.value.trim());
+                            this.value = '';
+                            scanBuffer = ''; // 清空全域 buffer 避免重複
+                        }
+                    }
+                });
+            }
+        })();
 
         const attachmentBarcodeInput = document.getElementById('attachment-barcode-input');
         if (attachmentBarcodeInput) {
@@ -512,7 +652,7 @@
             if (scannedBooks.length === 0) return;
             if (btn) btn.disabled = true;
             // 先喚醒並執行 homing，再執行 open，避免因 state4 導致 open 失敗
-            showLoading('喚醒並回原點中，稍候再開啟投書口…');
+            showLoading('機器啟動中 請稍等');
             try {
                 const wakeRes = await fetch('/api/hardware/wake_and_home', { method: 'POST' });
                 const wakeJson = await wakeRes.json().catch(()=>({}));
@@ -523,7 +663,7 @@
                 }
     
                 // 喚醒並回原點成功，接著開門
-                showLoading('正在開啟投書口，請稍候…');
+                showLoading('開門中，請稍候…', '開門中，請稍候');
                 const res = await fetch('/api/hardware/open', { method: 'POST' });
                 const result = await res.json();
                 if (res.ok && result.success) {
@@ -531,7 +671,7 @@
                     nextStep('step-place-book');
                 } else {
                     hideLoading();
-                    alert(result.message || '開啟投書口失敗');
+                    alert(result.message || '開門失敗');
                 }
             } catch (e) {
                 hideLoading();
@@ -558,6 +698,86 @@
             }, 5000);
         }
 
+        // 取消還書確認：顯示提示視窗（請先確認書本未放入）
+        function openCancelConfirmModal(btn) {
+            console.log('openCancelConfirmModal called');
+            const modal = document.getElementById('cancel-confirm-modal');
+            if (!modal) {
+                console.error('Modal #cancel-confirm-modal not found!');
+                // Fallback if modal missing: directly cancel
+                if(confirm('請確認書籍未放入還書箱。確定要取消嗎？')) {
+                    cancelReturn(btn);
+                }
+                return;
+            }
+            // store reference to originating button for later use
+            modal._originBtn = btn;
+            modal.style.display = 'flex';
+        }
+
+        function hideCancelModal() {
+            const modal = document.getElementById('cancel-confirm-modal');
+            if (!modal) return;
+            modal.style.display = 'none';
+            modal._originBtn = null;
+        }
+        
+        async function confirmCancel() {
+            const modal = document.getElementById('cancel-confirm-modal');
+            if (!modal) return;
+            const btn = modal._originBtn || null;
+            hideCancelModal();
+            // 執行真正的 cancelReturn 工作
+            await cancelReturn(btn);
+        }
+
+        // 取消還書：嘗試關門後立即重置前端狀態（確保 UI 回到首頁）
+        async function cancelReturn(btn) {
+            if (btn) btn.disabled = true;
+            showLoading('請勿將手伸入還書箱，以免受傷...');
+            try {
+                // 嘗試關門 API
+                let closed = false;
+                try {
+                    const res = await fetch('/api/hardware/close', { method: 'POST' });
+                    const j = await res.json().catch(()=>null);
+                    if (res.ok && (j === null || j.success === undefined || j.success)) closed = true;
+                } catch (e) {
+                    console.warn('close API failed, will fallback to wake_and_home', e);
+                }
+    
+                // 若 close 失敗，改用 wake_and_home 作為保險
+                if (!closed) {
+                    try {
+                        const wakeRes = await fetch('/api/hardware/wake_and_home', { method: 'POST' });
+                        const wakeJson = await wakeRes.json().catch(()=>null);
+                        if (!wakeRes.ok || (wakeJson && wakeJson.success === false)) {
+                            throw new Error((wakeJson && wakeJson.message) || 'wake_and_home failed');
+                        }
+                    } catch (e) {
+                        console.warn('wake_and_home fallback failed', e);
+                        // 繼續重置 UI，但提示管理員
+                        alert('無法確認關門狀態，已重置介面，請聯絡管理員確認機器狀態。');
+                    }
+                }
+    
+                // 立即重置前端狀態（不再完全依賴 resetFlow，以避免重複呼叫硬體指令）
+                clearTimeout(autoRedirectTimer);
+                clearInterval(countdownInterval);
+                scannedBooks = [];
+                currentProcessingBook = null;
+                currentAttachmentBarcode = null;
+                updateBookList();
+                nextStep('step-welcome');
+            } catch (e) {
+                console.error('cancelReturn error', e);
+                alert('取消還書時發生錯誤');
+            } finally {
+                hideLoading();
+                if (btn) setTimeout(() => { try { btn.disabled = false } catch(e){} }, 500);
+            }
+        }
+
         // 確認還書 (最終步驟 - 一般書籍)
         // 改為在送出還書前確保機器已喚醒並回原點，避免因 state4 卡住導致關門/分類失敗
         async function finalizeReturn(btn) {
@@ -565,19 +785,10 @@
             if (btn) btn.disabled = true;
     
             const bookIds = scannedBooks.map(b => b.book_id);
-            // 先喚醒並回原點
-            showLoading('喚醒並回原點中，準備關門並處理還書…');
+            // 直接執行還書 API（關門與檢查由後端處理）
+            // 顯示「關門中」以反映使用者實際期待的動作；若後端回報 BOOK_NOT_DETECTED 再顯示重新開門
+            showLoading('關門中，請稍候…', '關門中，請稍候');
             try {
-                const wakeRes = await fetch('/api/hardware/wake_and_home', { method: 'POST' });
-                const wakeJson = await wakeRes.json().catch(()=>({}));
-                if (!wakeRes.ok || !wakeJson.success) {
-                    hideLoading();
-                    alert(wakeJson.message || '喚醒或回原點失敗，請稍候再試');
-                    return;
-                }
-    
-                // 已喚醒並回原點，執行還書 API（關門與檢查由後端處理）
-                showLoading('正在處理還書，請稍候…');
                 const response = await fetch('/api/return', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
@@ -625,7 +836,7 @@
                }
    
                // 喚醒並回原點成功，開門讓使用者放書
-               showLoading('正在開啟投書口 (書籍)，請稍候…');
+               showLoading('開門中（書籍），請稍候…', '開門中，請稍候');
                const res = await fetch('/api/hardware/open', { method: 'POST' });
                const result = await res.json();
                if (res.ok && result.success) {
@@ -639,7 +850,7 @@
                    }
                } else {
                    hideLoading();
-                   alert(result.message || '開啟投書口失敗');
+                   alert(result.message || '開門失敗');
                }
            } catch (e) {
                hideLoading();

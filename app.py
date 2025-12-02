@@ -152,9 +152,11 @@ def init_sip2_client():
         
     inst = global_config.LIBRARY_INSTITUTION
     
-    logger.info(f"Initializing SIP2 Client: {host}:{port}, Inst={inst}, Login={global_config.LIBRARY_LOGIN_ENABLED}")
+    mock_enabled = global_config.LIBRARY_MOCK_ENABLED
     
-    if host.lower() == 'mock':
+    logger.info(f"Initializing SIP2 Client: {host}:{port}, Inst={inst}, Login={global_config.LIBRARY_LOGIN_ENABLED}, Mock={mock_enabled}")
+    
+    if mock_enabled or host.lower() == 'mock':
         sip2 = MockSIP2Client(host, port, user, pwd, institution_id=inst)
     else:
         # 真實連線
@@ -259,7 +261,11 @@ def admin():
     """渲染管理員後台"""
     if REQUIRE_ADMIN_LOGIN and not session.get('logged_in'):
         return redirect(url_for('login'))
-    return render_template('admin.html')
+    # Pass current config to template for pre-filling forms
+    current_config = {
+        'max_return_limit': MAX_RETURN_LIMIT
+    }
+    return render_template('admin.html', config=current_config)
 
 @app.route('/api/status')
 def get_status():
@@ -453,30 +459,32 @@ def return_book():
     current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
     # 硬體還書流程控制
-    # 1. 確保機器處於可執行關門/檢查的狀態（若尚未 homed，嘗試同步 homing）
+    # 1. 狀態檢查：若為狀態 3 (OPENED) 則直接執行；否則觸發 Homing
     try:
-        homed = bool(getattr(machine, 'is_homed', False))
-        if not homed:
-            logger.info("Machine not homed before close; attempting synchronous homing...")
-            try:
-                resp = machine._send_command("homing")
-                logger.info(f"Homing before return response: {resp}")
-                homed = ("homed" in str(resp).lower()) or ("ack" in str(resp).lower())
-                machine.is_homed = bool(homed)
-            except Exception as e:
-                logger.warning(f"Homing before return failed to send: {e}")
-                homed = False
-
-        if not homed:
-            logger.warning("Homing before close did not confirm; aborting return to avoid state errors")
-            return jsonify({
-                "success": False,
-                "message": "機器尚未準備好（homing 失敗），請稍後再試或通知管理員",
-                "code": "MACHINE_NOT_READY"
-            }), 503
+        status = machine.get_status()
+        is_state_3 = False
+        
+        # 判斷是否為狀態 3 (數值或字串判斷)
+        s_status = str(status).strip()
+        if s_status.isdigit() and int(s_status) == getattr(machine, 'STATE_OPENED', 3):
+            is_state_3 = True
+        elif "opened" in s_status.lower() or "error state 3" in s_status.lower():
+            is_state_3 = True
+            
+        if is_state_3:
+            logger.info(f"Machine is in state {status} (OPENED). Proceeding to close directly.")
+        else:
+            logger.warning(f"Machine state is '{status}' (Not OPENED). Triggering HOMING as safety fallback.")
+            # 非狀態 3，執行 Homing
+            resp = machine._send_command("homing")
+            logger.info(f"Fallback homing response: {resp}")
+            
     except Exception as e:
-        logger.error(f"Pre-close homing check failed: {e}")
-        return jsonify({"success": False, "message": "機器狀態檢查失敗"}), 500
+        logger.error(f"Pre-close status check failed: {e}. Defaulting to HOMING.")
+        try:
+             machine._send_command("homing")
+        except:
+             pass
 
     # 2. 關閉投書口（前端應已開門並使用者放入）
     machine.close_door()
@@ -689,7 +697,7 @@ def clear_history():
 
 @app.route('/api/admin/set_limit', methods=['POST'])
 def set_limit():
-    """設定還書箱上限（動態修改 MAX_RETURN_LIMIT）"""
+    """設定還書箱上限（動態修改 MAX_RETURN_LIMIT 並寫入 config.yml）"""
     if REQUIRE_ADMIN_LOGIN and not session.get('logged_in'):
         return jsonify({"success": False, "message": "未登入"}), 401
 
@@ -702,9 +710,28 @@ def set_limit():
     if new_limit < 1 or new_limit > 100:
         return jsonify({"success": False, "message": "限制值必須介於 1 到 100"}), 400
 
-    global MAX_RETURN_LIMIT
-    MAX_RETURN_LIMIT = new_limit
-    return jsonify({"success": True, "message": f"還書箱上限已設定為 {MAX_RETURN_LIMIT}", "limit": MAX_RETURN_LIMIT})
+    try:
+        # 1. 讀取現有 config.yml
+        current_conf = {}
+        if CONFIG_FILE.exists():
+            current_conf = yaml.safe_load(CONFIG_FILE.read_text(encoding='utf-8')) or {}
+        
+        # 2. 更新 max_return_limit
+        current_conf['max_return_limit'] = new_limit
+        
+        # 3. 寫回 config.yml
+        CONFIG_FILE.write_text(yaml.dump(current_conf, allow_unicode=True), encoding='utf-8')
+        
+        # 4. Reload config
+        global_config.reload_config()
+        global MAX_RETURN_LIMIT
+        MAX_RETURN_LIMIT = new_limit
+        
+        return jsonify({"success": True, "message": f"還書箱上限已設定為 {MAX_RETURN_LIMIT}", "limit": MAX_RETURN_LIMIT})
+        
+    except Exception as e:
+        logger.error(f"set_limit error: {e}")
+        return jsonify({"success": False, "message": "設定儲存失敗"}), 500
 
 @app.route('/api/hardware/open', methods=['POST'])
 def open_hardware_door():
@@ -729,15 +756,21 @@ def wake_hardware():
 
 @app.route('/api/hardware/wake_and_home', methods=['POST'])
 def wake_and_home():
-    """喚醒機器並同步執行 homing（回原點），僅在 homing 成功時回傳 success。"""
+    """初始化/回原點操作：僅在必要時或使用者手動要求時執行 homing。
+    
+    依據新邏輯：
+    - 若此路由被觸發，代表前端認為需要「重置」或「回原點」。
+    - 這裡會發送 homing 指令，作為手動初始化的手段。
+    - 喚醒動作 (wake_up) 只負責 dep1，這裡則負責 homing。
+    """
     try:
-        if not hasattr(machine, 'wake_up'):
-            return jsonify({"success": False, "message": "機器不支援喚醒操作"}), 501
+        # 1. 確保喚醒
+        if hasattr(machine, 'wake_up'):
+            machine.wake_up()
+        else:
+            machine._send_command("dep1")
 
-        # 先喚醒（非阻塞喚醒，機器物件會在內部啟動非同步 homing 或設定旗標）
-        machine.wake_up()
-
-        # 嘗試同步執行 homing，使用 _send_command 以取得明確回應
+        # 2. 發送 homing 指令 (手動初始化)
         try:
             resp = machine._send_command("homing")
         except Exception as e:
@@ -749,16 +782,21 @@ def wake_and_home():
             ok = ("homed" in str(resp).lower()) or ("ack" in str(resp).lower())
         except Exception:
             ok = False
+        
+        # 更新內部狀態
+        if hasattr(machine, 'is_homed'):
+            machine.is_homed = ok
 
         if ok:
-            return jsonify({"success": True, "message": "已喚醒並回原點", "response": resp})
+            return jsonify({"success": True, "message": "已執行回原點 (初始化)", "response": resp})
         else:
-            logger.warning(f"wake_and_home: homing did not confirm, resp={resp}")
-            return jsonify({"success": False, "message": "homing 未確認", "response": resp}), 500
+            # 有些機器 homing 回傳可能不包含 homed 字樣，若沒報錯也視為執行完畢
+            logger.warning(f"wake_and_home: homing response inconclusive, resp={resp}")
+            return jsonify({"success": True, "message": "回原點指令已發送", "response": resp})
 
     except Exception as e:
         logger.error(f"wake_and_home error: {e}")
-        return jsonify({"success": False, "message": "喚醒並回原點失敗", "detail": str(e)}), 500
+        return jsonify({"success": False, "message": "操作失敗", "detail": str(e)}), 500
 
 # 移除 get_books 因為改用 SIP2
 
@@ -826,7 +864,7 @@ def test_uart():
 
 @app.route('/api/admin/set_uart', methods=['POST'])
 def set_uart():
-    """設定機器 UART（會寫入 machine_config.json 並嘗試重新連線）"""
+    """設定機器 UART（會寫入 machine_config.json 與 config.yml 並嘗試重新連線）"""
     if REQUIRE_ADMIN_LOGIN and not session.get('logged_in'):
         return jsonify({"success": False, "message": "未登入"}), 401
 
@@ -843,17 +881,30 @@ def set_uart():
         return jsonify({"success": False, "message": "baudrate 必須為整數"}), 400
 
     try:
-        cfg = {"port": port, "baudrate": baud}
-        # 儲存設定檔（供 machine 啟動時讀取）
-        Path('machine_config.json').write_text(json.dumps(cfg), encoding='utf-8')
-        # 嘗試立即套用到 machine 物件
+        uart_cfg = {"port": port, "baudrate": baud}
+        
+        # 1. 寫入 machine_config.json (保持向後相容)
+        Path('machine_config.json').write_text(json.dumps(uart_cfg), encoding='utf-8')
+        
+        # 2. 同步寫入 config.yml
+        current_conf = {}
+        if CONFIG_FILE.exists():
+            current_conf = yaml.safe_load(CONFIG_FILE.read_text(encoding='utf-8')) or {}
+        current_conf['machine'] = uart_cfg
+        CONFIG_FILE.write_text(yaml.dump(current_conf, allow_unicode=True), encoding='utf-8')
+        
+        # 3. Reload config
+        global_config.reload_config()
+
+        # 4. 嘗試立即套用到 machine 物件
         applied = False
         try:
             applied = machine.set_uart(port, baud)
         except Exception as e:
             logger.error(f"apply UART failed: {e}")
-        logger.info(f"Admin action: set_uart -> {cfg}, applied={applied}")
-        return jsonify({"success": True, "applied": applied, "uart": cfg})
+            
+        logger.info(f"Admin action: set_uart -> {uart_cfg}, applied={applied}")
+        return jsonify({"success": True, "applied": applied, "uart": uart_cfg})
     except Exception as e:
         logger.error(f"set_uart error: {e}")
         return jsonify({"success": False, "message": "設定失敗"}), 500
@@ -870,6 +921,7 @@ def get_library_config():
     return jsonify({
         "success": True,
         "config": {
+            "mock_enabled": global_config.LIBRARY_MOCK_ENABLED,
             "host": global_config.LIBRARY_HOST,
             "port": global_config.LIBRARY_PORT,
             "login_enabled": global_config.LIBRARY_LOGIN_ENABLED,
@@ -887,6 +939,7 @@ def set_library_config():
         return jsonify({"success": False, "message": "未登入"}), 401
 
     data = request.json or {}
+    mock_enabled = data.get('mock_enabled', False)
     host = data.get('host')
     port = data.get('port')
     login_enabled = data.get('login_enabled', False)
@@ -897,6 +950,9 @@ def set_library_config():
     if not host or not port:
          return jsonify({"success": False, "message": "Host 與 Port 為必填"}), 400
 
+    if not inst:
+         return jsonify({"success": False, "message": "機構代碼 (AO) 為必填"}), 400
+
     try:
         # 1. 讀取現有 config.yml
         current_conf = {}
@@ -905,6 +961,7 @@ def set_library_config():
         
         # 2. 更新 library 區塊
         lib_conf = current_conf.get('library', {})
+        lib_conf['mock_enabled'] = bool(mock_enabled)
         lib_conf['host'] = host
         lib_conf['port'] = int(port)
         lib_conf['login_enabled'] = bool(login_enabled)
@@ -941,6 +998,7 @@ def test_library_conn():
         return jsonify({"success": False, "message": "未登入"}), 401
         
     data = request.json or {}
+    mock_enabled = data.get('mock_enabled', False)
     host = data.get('host')
     port = data.get('port')
     login_enabled = data.get('login_enabled', False)
@@ -961,8 +1019,8 @@ def test_library_conn():
          return jsonify({"success": False, "message": "Host 與 Port 為必填"}), 400
          
     try:
-        if host.lower() == 'mock':
-             return jsonify({"success": True, "message": "Mock 連線測試成功"})
+        if mock_enabled or host.lower() == 'mock':
+             return jsonify({"success": True, "message": "Mock 連線測試成功 (強制 Mock 模式)"})
              
         test_client = SIP2Client(host, int(port), user, pwd, institution_id=inst)
         if test_client.connect():

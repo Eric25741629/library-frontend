@@ -37,16 +37,71 @@
         }
     
         // 顯示 / 隱藏 Loading Overlay（用於硬體控制命令）
-        function showLoading(message) {
+        function showLoading(message, title) {
             const overlay = document.getElementById('loading-overlay');
             const msg = document.getElementById('loading-message');
-            if (msg) msg.textContent = message || '';
+            const titleEl = document.getElementById('loading-title');
+            const text = message || '請稍候';
+            if (msg) msg.textContent = text;
+            // Explicit title parameter優先，其次根據訊息字串判斷，最後使用通用標題
+            if (title && titleEl) {
+                titleEl.textContent = title;
+            } else if (titleEl) {
+                if (text.includes('開門')) {
+                    titleEl.textContent = '開門中，請稍候';
+                } else if (text.includes('關門')) {
+                    titleEl.textContent = '關門中，請稍候';
+                } else {
+                    titleEl.textContent = '處理中，請稍候';
+                }
+            }
             if (overlay) overlay.style.display = 'flex';
         }
+        // 註冊於全域，讓頁面其他位置可安全委派給此實作
+        window.__rb_showLoading = showLoading;
+        // 覆寫全域 showLoading/hideLoading，確保 partial 的實作優先（若此 partial 在頁面較晚載入）
+        window.showLoading = showLoading;
+        window.hideLoading = function() {
+            const overlay = document.getElementById('loading-overlay');
+            if (overlay) overlay.style.display = 'none';
+        };
     
         function hideLoading() {
             const overlay = document.getElementById('loading-overlay');
             if (overlay) overlay.style.display = 'none';
+        }
+        
+        /*
+          Helper: 只在必要時執行喚醒並回原點 (wake_and_home)
+          - 若 /api/status 回傳機器已就緒 (is_homed 且非 sleeping)，則跳過 wake_and_home。
+          - 否則呼叫 /api/hardware/wake_and_home 並回傳結果。
+          回傳格式:
+            { skipped: true, status }                // 已就緒，跳過
+            { skipped: false, error: true, resp }    // 呼叫失敗或例外
+            { skipped: false, error: false, resp, respFetchResult } // 呼叫成功 (resp: parsed json)
+        */
+        async function ensureAwakeAndHomedIfNeeded() {
+            try {
+                const statusResp = await fetch('/api/status').then(r => r.json()).catch(()=>null);
+                if (statusResp && statusResp.is_homed && !statusResp.homing_in_progress && statusResp.machine_state !== 'sleeping' && statusResp.machine_state !== 'unavailable') {
+                    return { skipped: true, status: statusResp };
+                }
+        
+                // 需要喚醒並回原點：設定短暫跳過狀態輪詢，執行 API
+                SKIP_STATUS_UNTIL = Date.now() + 10000;
+                const res = await fetch('/api/hardware/wake_and_home', { method: 'POST' });
+                const j = await res.json().catch(()=>null);
+                if (!res.ok) {
+                    // 清除暫停旗標，讓前端能立即看到最新狀態
+                    SKIP_STATUS_UNTIL = 0;
+                    return { skipped: false, error: true, resp: j, respFetchResult: res };
+                }
+                SKIP_STATUS_UNTIL = 0;
+                return { skipped: false, error: false, resp: j, respFetchResult: res };
+            } catch (e) {
+                SKIP_STATUS_UNTIL = 0;
+                return { skipped: false, error: true, resp: String(e) };
+            }
         }
     
         let autoRedirectTimer;
@@ -60,21 +115,21 @@
             // 若有按鈕來源，避免重複點擊
             if (btn) btn.disabled = true;
             // 嘗試喚醒並回原點，確保機器回到標準狀態，避免殘留 state4
-            showLoading('正在回原點，稍候…');
+            showLoading('機器啟動中 請稍後');
             try {
-                // 暫停 status poll 以避免與同步 homing 指令衝突
-                SKIP_STATUS_UNTIL = Date.now() + 10000; // 10 秒內跳過狀態查詢
-                const res = await fetch('/api/hardware/wake_and_home', { method: 'POST' });
-                // 若 homing 失敗，也不要阻塞使用者太久，只記錄並提示
-                if (!res.ok) {
-                    const j = await res.json().catch(()=>({}));
+                // 確認是否需要喚醒並回原點
+                const wakeResult = await ensureAwakeAndHomedIfNeeded();
+                if (wakeResult.error) {
+                    const j = wakeResult.resp || {};
                     console.warn('wake_and_home failed', j);
-                    // 可選：顯示短暫提示但仍重置介面
-                    alert(j.message || '機器回原點失敗，請通知管理員。');
+                    alert((j && j.message) || '機器回原點失敗，請通知管理員。');
+                } else if (wakeResult.skipped) {
+                    // 已就緒、跳過 wake_and_home
+                    checkSystemStatus();
+                } else {
+                    // 已執行 wake_and_home 並成功返回
+                    checkSystemStatus();
                 }
-                // 指令完成後（不論成功與否），清除暫停旗標並立即更新狀態
-                SKIP_STATUS_UNTIL = 0;
-                checkSystemStatus();
             } catch (e) {
                 console.error('wake_and_home request error', e);
             } finally {
@@ -117,6 +172,13 @@
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({ book_id: bookId })
                 });
+                // 若後端回傳 5xx (例如圖書館連線錯誤)，在掃描時立即提示使用者
+                if (response.status >= 500) {
+                    statusText.textContent = '圖書館系統連線異常，請稍後再試';
+                    statusText.style.color = 'red';
+                    document.getElementById('main-scan-box').classList.remove('active');
+                    return;
+                }
                 const result = await response.json();
     
                 if (result.success) {
@@ -220,24 +282,25 @@
             if (scannedBooks.length === 0) return;
             if (btn) btn.disabled = true;
             // 先喚醒並執行 homing，再執行 open，避免因 state4 導致 open 失敗
-            showLoading('喚醒並回原點中，稍候再開啟投書口…');
+            showLoading('機器啟動中 請稍後');
             try {
-                // 暫停 status poll 以避免與同步 homing 指令衝突
-                SKIP_STATUS_UNTIL = Date.now() + 10000; // 10 秒內跳過狀態查詢
-                const wakeRes = await fetch('/api/hardware/wake_and_home', { method: 'POST' });
-                const wakeJson = await wakeRes.json().catch(()=>({}));
-                if (!wakeRes.ok || !wakeJson.success) {
+                // 確認是否需要喚醒並回原點
+                const wakeResObj = await ensureAwakeAndHomedIfNeeded();
+                if (wakeResObj.error) {
                     hideLoading();
-                    alert(wakeJson.message || '喚醒或回原點失敗，請稍候再試');
+                    const j = wakeResObj.resp || {};
+                    alert((j && j.message) || '喚醒或回原點失敗，請稍候再試');
                     return;
                 }
-
-                // 指令完成，清除暫停並更新狀態
-                SKIP_STATUS_UNTIL = 0;
+                if (!wakeResObj.skipped) {
+                    // wake_and_home 已執行且成功
+                    // wakeResult 已在 helper 中將 SKIP_STATUS_UNTIL 還原
+                }
+                // 指令完成或不需要，更新狀態
                 checkSystemStatus();
     
                 // 喚醒並回原點成功，接著開門
-                showLoading('正在開啟投書口，請稍候…');
+                showLoading('正在開啟投書口，請稍候…', '開門中，請稍候');
                 const res = await fetch('/api/hardware/open', { method: 'POST' });
                 const result = await res.json();
                 if (res.ok && result.success) {
@@ -279,25 +342,10 @@
             if (btn) btn.disabled = true;
     
             const bookIds = scannedBooks.map(b => b.book_id);
-            // 先喚醒並回原點
-            showLoading('喚醒並回原點中，準備關門並處理還書…');
+            // 直接執行還書 API（關門與檢查由後端處理）
+            // 顯示「關門中」以反映使用者實際期待的動作；若後端回報 BOOK_NOT_DETECTED 再顯示重新開門
+            showLoading('關門中，請稍候…', '關門中，請稍候');
             try {
-                // 暫停 status poll 以避免與同步 homing 指令衝突
-                SKIP_STATUS_UNTIL = Date.now() + 10000; // 10 秒內跳過狀態查詢
-                const wakeRes = await fetch('/api/hardware/wake_and_home', { method: 'POST' });
-                const wakeJson = await wakeRes.json().catch(()=>({}));
-                if (!wakeRes.ok || !wakeJson.success) {
-                    hideLoading();
-                    alert(wakeJson.message || '喚醒或回原點失敗，請稍候再試');
-                    return;
-                }
-
-                // 指令完成，清除暫停並更新狀態
-                SKIP_STATUS_UNTIL = 0;
-                checkSystemStatus();
-    
-                // 已喚醒並回原點，執行還書 API（關門與檢查由後端處理）
-                showLoading('正在處理還書，請稍候…');
                 const response = await fetch('/api/return', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
@@ -334,7 +382,7 @@
         async function processBookWithAttachment(btn) {
              if (btn) btn.disabled = true;
              // 先確保機器已喚醒並回原點，避免 state4 卡住
-             showLoading('喚醒並回原點中，稍候再開啟投書口 (書籍)…');
+             showLoading('機器啟動中 請稍後');
              try {
                 const wakeRes = await fetch('/api/hardware/wake_and_home', { method: 'POST' });
                 const wakeJson = await wakeRes.json().catch(()=>({}));
@@ -349,7 +397,7 @@
                 checkSystemStatus();
     
                 // 喚醒並回原點成功，開門讓使用者放書
-                showLoading('正在開啟投書口 (書籍)，請稍候…');
+                showLoading('正在開啟投書口 (書籍)，請稍候…', '開門中，請稍候');
                 const res = await fetch('/api/hardware/open', { method: 'POST' });
                 const result = await res.json();
                 if (res.ok && result.success) {
@@ -443,7 +491,7 @@
         // 2.6 開啟投書口供附件投入
         async function startAttachmentInsertion() {
              // 先喚醒並回原點，確保能安全開門接收附件
-             showLoading('喚醒並回原點中，稍候再開啟投書口 (附件)…');
+             showLoading('機器啟動中 請稍後');
              try {
                  // 暫停 status poll 以避免與同步 homing 指令衝突
                  SKIP_STATUS_UNTIL = Date.now() + 10000; // 10 秒內跳過狀態查詢
@@ -549,13 +597,14 @@
                         const machDot = document.getElementById('machine-dot');
                         const machText = document.getElementById('machine-text');
     
-                        // 圖書館連線狀態
+                        // 圖書館連線狀態（非阻斷式顯示；若失敗由掃描流程在必要時提示）
                         if (data.library_ok) {
                             libDot.style.backgroundColor = '#2ecc71';
                             libText.textContent = '可用';
                         } else {
-                            libDot.style.backgroundColor = '#dc3545';
-                            libText.textContent = '連線失敗';
+                            // 顯示為警示色但不阻擋使用者操作；實際錯誤會在掃描時顯示
+                            libDot.style.backgroundColor = '#ffc107';
+                            libText.textContent = '離線（後台自動重試）';
                         }
     
                         // 依 machine_state 與 homing flag 更新機器顯示（優先使用 machine_state）
@@ -602,17 +651,44 @@
                 .catch(err => console.error('Status check failed', err));
         }
     
-        // 當有人點擊螢幕時喚醒機器（節流 30 秒）
+        // 當有人點擊螢幕時先確認圖書館伺服器連線，若可用再喚醒機器（節流 30 秒）
         (function(){
             let lastWake = 0;
             const WAKE_THROTTLE_MS = 30000;
-            function tryWake() {
+            async function tryWake() {
                 const now = Date.now();
                 if (now - lastWake < WAKE_THROTTLE_MS) return;
                 lastWake = now;
-                fetch('/api/hardware/wake', { method: 'POST' })
-                    .then(r => r.json().catch(()=>{}))
-                    .catch(()=>{});
+                try {
+                    // 先非阻斷地查詢當前狀態，確認 library_ok
+                    const status = await fetch('/api/status').then(r => r.json()).catch(()=>null);
+                    if (!status) return;
+                    if (status.library_ok) {
+                        // 若圖書館可用，才發出 wake 指令
+                        fetch('/api/hardware/wake', { method: 'POST' })
+                            .then(r => r.json().catch(()=>{}))
+                            .catch(()=>{});
+                    } else {
+                        // 若圖書館不可用，給予輕量式 UI 提示（閃爍 lib-dot 或 console）
+                        try {
+                            const libDot = document.getElementById('lib-dot');
+                            const libText = document.getElementById('lib-text');
+                            if (libDot) {
+                                const orig = libDot.style.backgroundColor;
+                                libDot.style.backgroundColor = '#ffc107';
+                                setTimeout(() => { libDot.style.backgroundColor = orig; }, 2000);
+                            }
+                            if (libText) {
+                                const origTxt = libText.textContent;
+                                libText.textContent = '圖書館離線';
+                                setTimeout(() => { libText.textContent = origTxt; }, 2000);
+                            }
+                        } catch(e){ console.warn('UI hint failed', e); }
+                        console.warn('Library server unavailable — skipped wake.');
+                    }
+                } catch (e) {
+                    console.warn('tryWake error', e);
+                }
             }
             // 對主要互動事件監聽（點擊、觸控、鍵盤）
             document.addEventListener('click', tryWake);

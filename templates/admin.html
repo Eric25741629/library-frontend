@@ -400,6 +400,46 @@
         }
         input:checked + .slider { background-color: var(--primary-color); }
         input:checked + .slider:before { transform: translateX(24px); }
+
+        /* Settings Sub-tabs */
+        .settings-tabs {
+            display: flex;
+            margin-bottom: 24px;
+            border-bottom: 1px solid var(--border-color);
+        }
+        
+        .settings-tab {
+            padding: 12px 24px;
+            cursor: pointer;
+            font-weight: 500;
+            color: var(--text-secondary);
+            border-bottom: 2px solid transparent;
+            transition: all 0.3s;
+        }
+        
+        .settings-tab:hover {
+            color: var(--primary-color);
+            background-color: rgba(67, 97, 238, 0.02);
+        }
+        
+        .settings-tab.active {
+            color: var(--primary-color);
+            border-bottom-color: var(--primary-color);
+        }
+        
+        .settings-section {
+            display: none;
+            animation: fadeIn 0.3s ease;
+        }
+        
+        .settings-section.active {
+            display: block;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(5px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
     </style>
 </head>
 <body>
@@ -549,10 +589,10 @@
                     </div>
                     <div class="control-grid" style="grid-template-columns: repeat(4, 1fr);">
                         <button class="control-btn" onclick="sendMachineCommand('dep1')">
-                            <i class="fas fa-power-off" style="color: var(--success-color);"></i> 電源開啟
+                            <i class="fas fa-power-off" style="color: var(--success-color);"></i> 喚醒
                         </button>
                         <button class="control-btn" onclick="sendMachineCommand('dep0')">
-                            <i class="fas fa-power-off" style="color: var(--danger-color);"></i> 電源關閉
+                            <i class="fas fa-power-off" style="color: var(--danger-color);"></i> 休眠
                         </button>
                         <button class="control-btn" onclick="sendMachineCommand('homing')">
                             <i class="fas fa-home"></i> 回原點
@@ -599,74 +639,106 @@
                 </div>
             </div>
 
-            <div class="card" style="max-width: 600px;">
-                <div class="form-group">
-                    <label class="form-label">還書箱容量上限</label>
-                    <input type="number" id="settings-limit" class="form-input" min="1" max="100" value="{{ config.max_return_limit if config is defined else 20 }}">
-                </div>
-
-                <div style="height: 1px; background: var(--border-color); margin: 30px 0;"></div>
-
-                <h3 style="margin-bottom: 20px;">圖書館資料庫 (SIP2)</h3>
-                <div class="form-group">
-                    <label class="form-label">伺服器 IP (Host)</label>
-                    <input type="text" id="lib-host" class="form-input" placeholder="192.168.1.100">
-                </div>
-                <div class="form-group">
-                    <label class="form-label">連接埠 (Port)</label>
-                    <input type="number" id="lib-port" class="form-input" placeholder="6001">
-                </div>
-
-                <div class="form-group" style="display:flex; align-items:center; gap:12px; margin-top:20px; margin-bottom:20px;">
-                    <label class="switch">
-                        <input type="checkbox" id="lib-login-enabled" onchange="toggleLibLogin(this.checked)">
-                        <span class="slider round"></span>
-                    </label>
-                    <label for="lib-login-enabled" style="cursor:pointer; color:var(--text-primary); font-weight:500;">啟用 SIP2 帳號登入</label>
-                </div>
-
-                <div id="lib-login-fields" style="display:none; padding-left:12px; border-left:3px solid var(--border-color);">
-                    <div class="form-group">
-                        <label class="form-label">登入帳號 (Login User)</label>
-                        <input type="text" id="lib-user" class="form-input" placeholder="選填">
+            <div class="card" style="max-width: 800px;">
+                <div class="settings-tabs">
+                    <div class="settings-tab active" onclick="switchSettingsTab('library')">
+                        <i class="fas fa-book"></i> 圖書館資料庫 (SIP2)
                     </div>
-                    <div class="form-group">
-                        <label class="form-label">登入密碼 (Login Pass)</label>
-                        <input type="password" id="lib-pass" class="form-input" placeholder="選填">
+                    <div class="settings-tab" onclick="switchSettingsTab('machine')">
+                        <i class="fas fa-robot"></i> 還書機與硬體
                     </div>
                 </div>
 
-                <div class="form-group">
-                    <label class="form-label">機構代碼 (AO Institution ID)</label>
-                    <input type="text" id="lib-inst" class="form-input" placeholder="MAIN">
-                    <small style="color:var(--text-secondary)">預設為 MAIN，請依據 SIP2 Server 要求填寫</small>
+                <!-- Library Settings Tab -->
+                <div id="settings-tab-library" class="settings-section active">
+                    <div class="form-group" style="display:flex; align-items:center; gap:12px; margin-bottom:20px; background:#f8f9fa; padding:12px; border-radius:8px;">
+                        <label class="switch">
+                            <input type="checkbox" id="lib-mock-enabled">
+                            <span class="slider round"></span>
+                        </label>
+                        <label for="lib-mock-enabled" style="cursor:pointer; color:var(--text-primary); font-weight:500;">
+                            啟用 Mock 模擬模式
+                            <span style="font-weight:400; color:var(--text-secondary); font-size:13px;">(開啟後將不會實際連線至 SIP2 Server)</span>
+                        </label>
+                    </div>
+
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                        <div class="form-group">
+                            <label class="form-label">伺服器 IP (Host)</label>
+                            <input type="text" id="lib-host" class="form-input" placeholder="192.168.1.100">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">連接埠 (Port)</label>
+                            <input type="number" id="lib-port" class="form-input" placeholder="6001">
+                        </div>
+                    </div>
+
+                    <div class="form-group" style="display:flex; align-items:center; gap:12px; margin-top:10px; margin-bottom:10px;">
+                        <label class="switch">
+                            <input type="checkbox" id="lib-login-enabled" onchange="toggleLibLogin(this.checked)">
+                            <span class="slider round"></span>
+                        </label>
+                        <label for="lib-login-enabled" style="cursor:pointer; color:var(--text-primary); font-weight:500;">啟用 SIP2 帳號登入</label>
+                    </div>
+
+                    <div id="lib-login-fields" style="display:none; padding:16px; background:#f8f9fa; border-radius:8px; margin-bottom:20px;">
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                            <div class="form-group" style="margin-bottom:0;">
+                                <label class="form-label">登入帳號 (Login User)</label>
+                                <input type="text" id="lib-user" class="form-input" placeholder="選填">
+                            </div>
+                            <div class="form-group" style="margin-bottom:0;">
+                                <label class="form-label">登入密碼 (Login Pass)</label>
+                                <input type="password" id="lib-pass" class="form-input" placeholder="選填">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">機構代碼 (AO Institution ID)</label>
+                        <input type="text" id="lib-inst" class="form-input" placeholder="MAIN">
+                        <small style="color:var(--text-secondary)">預設為 MAIN，請依據 SIP2 Server 要求填寫</small>
+                    </div>
+
+                    <div style="margin-top: 30px; display: flex; justify-content: space-between; align-items: center;">
+                         <button class="btn btn-secondary" onclick="testLibraryConn()" style="background:#e0e5f2; color:#5f6c7b;">
+                            <i class="fas fa-network-wired"></i> 測試 SIP2 連線
+                        </button>
+                        <button class="btn btn-primary" onclick="saveSettings()">
+                            <i class="fas fa-save"></i> 儲存所有設定
+                        </button>
+                    </div>
                 </div>
 
-                <div style="margin-top: 10px; display: flex; justify-content: flex-end; gap: 10px;">
-                     <button class="btn btn-secondary" onclick="testLibraryConn()" style="background:#e0e5f2; color:#5f6c7b;">
-                        <i class="fas fa-network-wired"></i> 測試 SIP2 連線
-                    </button>
-                </div>
+                <!-- Machine Settings Tab -->
+                <div id="settings-tab-machine" class="settings-section">
+                    <h3 style="margin-bottom: 20px; color:var(--text-primary);">基本參數</h3>
+                    <div class="form-group">
+                        <label class="form-label">還書箱容量上限 (本)</label>
+                        <input type="number" id="settings-limit" class="form-input" min="1" max="100" value="{{ config.max_return_limit if config is defined else 20 }}">
+                        <small style="color:var(--text-secondary)">當箱內書籍數量達到此上限時，系統將暫停服務</small>
+                    </div>
 
-                <div style="height: 1px; background: var(--border-color); margin: 30px 0;"></div>
+                    <div style="height: 1px; background: var(--border-color); margin: 30px 0;"></div>
 
-                <h3 style="margin-bottom: 20px;">UART 硬體連線</h3>
-                <div class="form-group">
-                    <label class="form-label">序列埠 (Port)</label>
-                    <input type="text" id="uart-port" class="form-input" placeholder="/dev/uno">
-                </div>
-                <div class="form-group">
-                    <label class="form-label">鮑率 (Baudrate)</label>
-                    <input type="number" id="uart-baud" class="form-input" placeholder="38400">
-                </div>
+                    <h3 style="margin-bottom: 20px; color:var(--text-primary);">UART 硬體連線</h3>
+                    <div class="form-group">
+                        <label class="form-label">序列埠 (Port)</label>
+                        <input type="text" id="uart-port" class="form-input" placeholder="/dev/uno">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">鮑率 (Baudrate)</label>
+                        <input type="number" id="uart-baud" class="form-input" placeholder="38400">
+                    </div>
 
-                <div style="margin-top: 30px; display: flex; justify-content: flex-end; gap: 10px;">
-                    <button class="btn btn-warning" onclick="testUART()">
-                        <i class="fas fa-plug"></i> 測試 UART
-                    </button>
-                    <button class="btn btn-primary" onclick="saveSettings()">
-                        <i class="fas fa-save"></i> 儲存所有設定
-                    </button>
+                    <div style="margin-top: 30px; display: flex; justify-content: space-between; align-items: center;">
+                        <button class="btn btn-warning" onclick="testUART()">
+                            <i class="fas fa-plug"></i> 測試 UART 連線
+                        </button>
+                        <button class="btn btn-primary" onclick="saveSettings()">
+                            <i class="fas fa-save"></i> 儲存所有設定
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -697,6 +769,24 @@
                     el.classList.add('active');
                 }
             });
+        }
+
+        // Settings Sub-tab Switching
+        function switchSettingsTab(tabName) {
+            // Update Tab headers
+            document.querySelectorAll('.settings-tab').forEach(el => el.classList.remove('active'));
+            // Assuming order: 0=Library, 1=Machine. Better to use event target or IDs but this is simple.
+            // Using onclick in HTML passing 'library' or 'machine'
+            
+            // Find the tab element that was clicked (or match by text/icon if needed, but let's just use class toggling on siblings if we passed `this`)
+            // Actually, let's just query by onclick attribute content for simplicity in this static structure
+            document.querySelectorAll('.settings-tab').forEach(el => {
+                if(el.getAttribute('onclick').includes(tabName)) el.classList.add('active');
+            });
+
+            // Update Content sections
+            document.querySelectorAll('.settings-section').forEach(el => el.classList.remove('active'));
+            document.getElementById(`settings-tab-${tabName}`).classList.add('active');
         }
 
         // Initialization
@@ -767,12 +857,17 @@
         document.addEventListener('scroll', resetIdleTimer);
 
         // Auto Refresh
-        setInterval(() => { 
+        setInterval(() => {
+            // 只要不是隱藏狀態，就更新狀態（不論在儀表板或機器控制頁面）
+            // fetchLogs 只在儀表板時更新
             if(document.getElementById('view-dashboard').style.display !== 'none') {
-                fetchLogs(); 
-                fetchStatus();
+                fetchLogs();
             }
-        }, 30000);
+            
+            // 狀態更新頻率加快，且在各頁面都更新
+            // 注意：fetchStatus 會更新儀表板(stat-card)以及機器控制(machine-control-state)兩處的狀態
+            fetchStatus();
+        }, 3000);
 
         // --- Logic Functions (Same as before, adapted for new UI) ---
 
@@ -957,6 +1052,13 @@
         // Machine Command
         async function sendMachineCommand(cmd) {
             const respEl = document.getElementById('machine-response');
+            
+            // 鎖定所有控制按鈕與自訂輸入
+            const buttons = document.querySelectorAll('.control-btn, .btn-primary');
+            const customInput = document.getElementById('custom-cmd');
+            buttons.forEach(btn => btn.disabled = true);
+            if(customInput) customInput.disabled = true;
+
             respEl.value += `\n> Sending: ${cmd}...`;
             respEl.scrollTop = respEl.scrollHeight;
 
@@ -989,6 +1091,10 @@
                 }
                 respEl.value += `\nEXCEPTION: ${msg}`;
                 respEl.scrollTop = respEl.scrollHeight;
+            } finally {
+                // 解鎖所有按鈕與輸入
+                buttons.forEach(btn => btn.disabled = false);
+                if(customInput) customInput.disabled = false;
             }
         }
 
@@ -1019,6 +1125,7 @@
                 if(!res.ok) return;
                 const data = await res.json();
                 if(data.success && data.config) {
+                    document.getElementById('lib-mock-enabled').checked = !!data.config.mock_enabled;
                     document.getElementById('lib-host').value = data.config.host || '';
                     document.getElementById('lib-port').value = data.config.port || '';
                     document.getElementById('lib-user').value = data.config.login_user || '';
@@ -1039,6 +1146,7 @@
 
         async function testLibraryConn() {
             showLoading(true);
+            const mockEnabled = document.getElementById('lib-mock-enabled').checked;
             const host = document.getElementById('lib-host').value;
             const port = document.getElementById('lib-port').value;
             const loginEnabled = document.getElementById('lib-login-enabled').checked;
@@ -1051,6 +1159,7 @@
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({
+                        mock_enabled: mockEnabled,
                         host, port,
                         login_enabled: loginEnabled,
                         login_user: user, login_pass: pass, institution_id: inst
@@ -1110,12 +1219,19 @@
             const baud = parseInt(document.getElementById('uart-baud').value);
 
             // Library
+            const libMockEnabled = document.getElementById('lib-mock-enabled').checked;
             const libHost = document.getElementById('lib-host').value;
             const libPort = document.getElementById('lib-port').value;
             const libLoginEnabled = document.getElementById('lib-login-enabled').checked;
             const libUser = document.getElementById('lib-user').value;
             const libPass = document.getElementById('lib-pass').value;
             const libInst = document.getElementById('lib-inst').value;
+
+            if (!libInst) {
+                alert('機構代碼 (AO) 為必填');
+                showLoading(false);
+                return;
+            }
 
             try {
                 // 1. Limit
@@ -1133,10 +1249,11 @@
                 });
 
                 // 3. Library
-                await fetch('/api/admin/set_library_config', {
+                const libRes = await fetch('/api/admin/set_library_config', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({
+                        mock_enabled: libMockEnabled,
                         host: libHost,
                         port: libPort,
                         login_enabled: libLoginEnabled,
@@ -1146,9 +1263,38 @@
                     })
                 });
                 
-                alert('所有設定已儲存並生效');
+                if (!libRes.ok) {
+                    const err = await libRes.json();
+                    throw new Error(err.message || '圖書館設定儲存失敗');
+                }
+
+                // 4. Auto Test Library Connection after save
+                const testRes = await fetch('/api/admin/test_library_conn', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        mock_enabled: libMockEnabled,
+                        host: libHost,
+                        port: libPort,
+                        login_enabled: libLoginEnabled,
+                        login_user: libUser,
+                        login_pass: libPass,
+                        institution_id: libInst
+                    })
+                });
+                const testData = await testRes.json();
+                
+                let msg = '所有設定已儲存並生效。';
+                if (testData.success) {
+                    msg += '\n\n圖書館連線測試：成功 (' + testData.message + ')';
+                } else {
+                    msg += '\n\n警告：圖書館連線測試失敗 (' + testData.message + ')，請檢查設定。';
+                }
+                alert(msg);
                 fetchStatus();
-            } catch(e) { alert('儲存失敗'); }
+            } catch(e) {
+                alert('儲存失敗: ' + e.message);
+            }
             showLoading(false);
         }
 
