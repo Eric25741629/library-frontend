@@ -361,7 +361,13 @@
                     hideLoading();
                     // 如果是書籍未放入的錯誤，後端已重開門，前端需提示使用者
                     if (result.code === 'BOOK_NOT_DETECTED') {
-                        alert(result.message + "\n\n(投書口已重新開啟，請重新放入)");
+                        alert(result.message + "\n\n(投書口正在重新開啟，請稍候...)");
+                        
+                        // 顯示 Loading 直到門確實開啟
+                        showLoading('正在重新開啟投書口，請稍候...', '開門中');
+                        await waitForDoorOpen();
+                        hideLoading();
+                        
                         // 停留在原步驟，不跳轉，讓使用者可以再次點擊「完成投入」
                     } else {
                         alert(result.message || '還書失敗');
@@ -580,6 +586,23 @@
              }
         }
     
+        // 等待直到機器狀態變為 OPENED
+        async function waitForDoorOpen(timeoutSec = 10) {
+            const start = Date.now();
+            while (Date.now() - start < timeoutSec * 1000) {
+                try {
+                    const res = await fetch('/api/status');
+                    const data = await res.json();
+                    const state = (data.machine_state || '').toLowerCase();
+                    if (state === 'opened' || (data.machine_debug && data.machine_debug.is_open)) {
+                        return true;
+                    }
+                } catch(e) {}
+                await new Promise(r => setTimeout(r, 1000));
+            }
+            return false;
+        }
+
         // 定期檢查系統狀態（包含圖書館與機器通訊）
         function checkSystemStatus() {
             // 若剛剛觸發了會佔用 serial 的長指令（例如 homing），skip poll 以避免衝突

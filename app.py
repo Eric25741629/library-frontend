@@ -91,6 +91,8 @@ BARCODE_LOGIN_ENABLED = cfg.get('barcode_login_enabled', True)
 REQUIRE_ADMIN_LOGIN = cfg.get('require_admin_login', False)
 # 還書箱上限（可由管理介面變更）
 MAX_RETURN_LIMIT = int(cfg.get('max_return_limit', 20))
+# 是否啟用書籍檢測（可由管理介面變更）
+BOOK_CHECK_ENABLED = cfg.get('book_check_enabled', True)
 
 # 初始化機器：以 config.yml 的設定建立新的 MachineController 實例
 machine_cfg = cfg.get('machine', {})
@@ -299,42 +301,49 @@ def get_status():
         machine_ok = ser_open
         machine_debug["ser_open"] = ser_open
 
-        # 讀取機器內部狀態標記（若有）
+        # 主動更新機器狀態：呼叫 get_status 以觸發硬體查詢並更新內部 flag
+        # (避免因初始預設值 is_sleeping=True 導致誤判而未查詢硬體)
+        last_resp = ""
+        if machine and hasattr(machine, 'get_status'):
+            try:
+                last_resp = machine.get_status()
+            except Exception as e:
+                logger.debug(f"status probe get_status failed: {e}")
+
+        # 讀取更新後的機器內部狀態標記
         try:
             homing_in_progress = bool(getattr(machine, 'homing_in_progress', False))
             is_homed = bool(getattr(machine, 'is_homed', False))
+            is_sleeping = bool(getattr(machine, 'is_sleeping', False))
         except Exception:
             homing_in_progress = False
             is_homed = False
+            is_sleeping = False
 
         # 決定可讀狀態優先順序
         if machine is None:
             machine_state = "unavailable"
-        elif getattr(machine, 'is_sleeping', False):
+        elif is_sleeping:
             machine_state = "sleeping"
         elif homing_in_progress:
             machine_state = "homing"
         elif is_homed:
             machine_state = "homed"
         else:
-            # 嘗試解析 get_status 的回應以判斷狀態
-            if hasattr(machine, 'get_status'):
-                try:
-                    resp = machine.get_status() or ""
-                    low = str(resp).lower()
-                    if "open" in low or "opened" in low:
-                        machine_state = "opened"
-                    elif "closed" in low:
-                        machine_state = "closed"
-                    elif "power on" in low or "dep1" in low:
-                        machine_state = "power_on_not_homed"
-                    elif "homed" in low or "ack" in low:
-                        machine_state = "homed"
-                    else:
-                        machine_state = "ready"
-                except Exception as e:
-                    logger.debug(f"status probe get_status failed: {e}")
-                    machine_state = "unknown"
+            # 若無明確 flag，嘗試根據剛剛的 resp 解析 (fallback)
+            machine_state = "ready"
+            try:
+                low = str(last_resp).lower()
+                if "open" in low or "opened" in low:
+                    machine_state = "opened"
+                elif "closed" in low:
+                    machine_state = "closed"
+                elif "power on" in low or "dep1" in low:
+                    machine_state = "power_on_not_homed"
+                elif "homed" in low or "ack" in low:
+                    machine_state = "homed"
+            except Exception:
+                pass
     except Exception as e:
         logger.error(f"status check machine error: {e}")
         machine_ok = False
@@ -486,14 +495,56 @@ def return_book():
         except:
              pass
 
-    # 2. 關閉投書口（前端應已開門並使用者放入）
+    # 2. 關門前預檢 (Pre-check)
+    # 若啟用檢測且在關門前就偵測不到書籍，直接提示使用者，省去「關門->重開」的時間
+    if BOOK_CHECK_ENABLED:
+        logger.info("Pre-check: checking book status before closing door...")
+        if not machine.check_book_status():
+            logger.info("Pre-check failed: Book not detected. Aborting close.")
+            return jsonify({
+                "success": False,
+                "message": "未偵測到書籍，請確認書籍已放入並靠右對齊",
+                "code": "BOOK_NOT_DETECTED"
+            }), 400
+    else:
+        logger.info("Book check disabled by config. Skipping pre-check.")
+
+    # 3. 關閉投書口（前端應已開門並使用者放入）
     machine.close_door()
     time.sleep(1) # 等待門關閉
 
-    if not machine.check_book_status():
-        # 如果書沒放好，重開門
-        logger.info("Book not detected in return box, reopening door.")
-        machine.reopen_door()
+    # 4. 關門後複檢 (Post-check)
+    if BOOK_CHECK_ENABLED:
+        if not machine.check_book_status():
+            # 如果關門後書沒放好（可能滑落或預檢誤判），先回傳錯誤給前端，再背景執行重開門
+            logger.info("Post-check failed: Book not detected in return box, triggering async reopen.")
+            
+            def async_reopen():
+                try:
+                    # 稍微延遲一點點，讓前端有時間先處理 UI，避免瞬間搶佔資源（可選）
+                    time.sleep(0.1)
+                    machine.reopen_door()
+                except Exception as e:
+                    logger.error(f"Async reopen failed: {e}")
+
+            threading.Thread(target=async_reopen, daemon=True).start()
+
+            return jsonify({
+                "success": False,
+                "message": "未偵測到書籍，請確認書籍已放入並靠右對齊",
+                "code": "BOOK_NOT_DETECTED"
+            }), 400
+    else:
+        logger.info("Book check disabled by config. Skipping post-check.")
+            try:
+                # 稍微延遲一點點，讓前端有時間先處理 UI，避免瞬間搶佔資源（可選）
+                time.sleep(0.1)
+                machine.reopen_door()
+            except Exception as e:
+                logger.error(f"Async reopen failed: {e}")
+
+        threading.Thread(target=async_reopen, daemon=True).start()
+
         return jsonify({
             "success": False,
             "message": "未偵測到書籍，請確認書籍已放入並靠右對齊",
@@ -695,17 +746,28 @@ def clear_history():
     return jsonify({"success": True, "message": "歷史紀錄已清空"})
 
 
-@app.route('/api/admin/set_limit', methods=['POST'])
-def set_limit():
-    """設定還書箱上限（動態修改 MAX_RETURN_LIMIT 並寫入 config.yml）"""
+@app.route('/api/admin/get_machine_params', methods=['GET'])
+def get_machine_params():
+    if REQUIRE_ADMIN_LOGIN and not session.get('logged_in'):
+        return jsonify({"success": False, "message": "未登入"}), 401
+    return jsonify({
+        "success": True,
+        "limit": MAX_RETURN_LIMIT,
+        "book_check_enabled": BOOK_CHECK_ENABLED
+    })
+
+@app.route('/api/admin/set_machine_params', methods=['POST'])
+def set_machine_params():
+    """設定還書箱參數（上限、是否檢查書籍...）"""
     if REQUIRE_ADMIN_LOGIN and not session.get('logged_in'):
         return jsonify({"success": False, "message": "未登入"}), 401
 
     data = request.json or {}
     try:
         new_limit = int(data.get('limit'))
+        new_check = bool(data.get('book_check_enabled'))
     except Exception:
-        return jsonify({"success": False, "message": "參數錯誤，limit 必須為整數"}), 400
+        return jsonify({"success": False, "message": "參數錯誤"}), 400
 
     if new_limit < 1 or new_limit > 100:
         return jsonify({"success": False, "message": "限制值必須介於 1 到 100"}), 400
@@ -716,8 +778,9 @@ def set_limit():
         if CONFIG_FILE.exists():
             current_conf = yaml.safe_load(CONFIG_FILE.read_text(encoding='utf-8')) or {}
         
-        # 2. 更新 max_return_limit
+        # 2. 更新 config
         current_conf['max_return_limit'] = new_limit
+        current_conf['book_check_enabled'] = new_check
         
         # 3. 寫回 config.yml
         CONFIG_FILE.write_text(yaml.dump(current_conf, allow_unicode=True), encoding='utf-8')
@@ -725,12 +788,19 @@ def set_limit():
         # 4. Reload config
         global_config.reload_config()
         global MAX_RETURN_LIMIT
+        global BOOK_CHECK_ENABLED
         MAX_RETURN_LIMIT = new_limit
+        BOOK_CHECK_ENABLED = new_check
         
-        return jsonify({"success": True, "message": f"還書箱上限已設定為 {MAX_RETURN_LIMIT}", "limit": MAX_RETURN_LIMIT})
+        return jsonify({
+            "success": True,
+            "message": f"參數已更新 (上限: {MAX_RETURN_LIMIT}, 書籍檢測: {BOOK_CHECK_ENABLED})",
+            "limit": MAX_RETURN_LIMIT,
+            "book_check_enabled": BOOK_CHECK_ENABLED
+        })
         
     except Exception as e:
-        logger.error(f"set_limit error: {e}")
+        logger.error(f"set_machine_params error: {e}")
         return jsonify({"success": False, "message": "設定儲存失敗"}), 500
 
 @app.route('/api/hardware/open', methods=['POST'])
@@ -739,6 +809,13 @@ def open_hardware_door():
     if machine.open_door():
         return jsonify({"success": True, "message": "投書口已開啟"})
     return jsonify({"success": False, "message": "開啟失敗"}), 500
+
+@app.route('/api/hardware/close', methods=['POST'])
+def close_hardware_door():
+    """單獨關閉投書口 API (供前端流程控制)"""
+    if machine.close_door():
+        return jsonify({"success": True, "message": "投書口已關閉"})
+    return jsonify({"success": False, "message": "關閉失敗"}), 500
 
 @app.route('/api/hardware/wake', methods=['POST'])
 def wake_hardware():
