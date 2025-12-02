@@ -10,10 +10,15 @@ import serial
 MACHINE_CONFIG_FILE = Path('machine_config.json')
 
 class MachineController:
-    def __init__(self, port='/dev/uno', baudrate=38400):
+    def __init__(self, port='/dev/uno', baudrate=38400, simulate=False):
+        """
+        simulate: 若為 True，則不開啟序列埠，而在 _send_command 中回傳模擬回應，
+        方便遠端或 CI 在沒有實體設備時測試放書/檢查書籍流程。
+        """
         self.port = port
         self.baudrate = baudrate
         self.ser = None
+        self.simulate = bool(simulate)
         # Use dedicated 'machine' logger so machine logs go to machine.log
         self.logger = logging.getLogger('machine')
         # Threading lock to protect serial access across threads/requests
@@ -25,6 +30,7 @@ class MachineController:
         self.STATE_HOMED = 2
         self.STATE_OPENED = 3
         self.STATE_CLOSED = 4 # 等待確認書籍
+        self.STATE_SLEEPING = 5 # 待機中 (新增)
         
         # 閒置休眠設定
         self.last_action_time = time.time()
@@ -35,21 +41,28 @@ class MachineController:
         self.homing_in_progress = False
         # 機器是否已完成 homing（即為 ready state）
         self.is_homed = False
+        # 是否已完成初次初始化（區分第一次開機需要強制 homing）
+        self.initialized = False
         # 在非同步喚醒後，最長等待 homing 完成時間（秒）
         self.HOMING_WAIT_TIMEOUT = 30
 
-        try:
-            self.ser = serial.Serial(
-                port=self.port,
-                baudrate=self.baudrate,
-                bytesize=serial.EIGHTBITS,
-                parity=serial.PARITY_NONE,
-                stopbits=serial.STOPBITS_ONE,
-                timeout=2
-            )
-            self.logger.info(f"Connected to machine on {self.port}")
-        except Exception as e:
-            self.logger.error(f"Failed to connect to machine: {e}")
+        if not self.simulate:
+            try:
+                self.ser = serial.Serial(
+                    port=self.port,
+                    baudrate=self.baudrate,
+                    bytesize=serial.EIGHTBITS,
+                    parity=serial.PARITY_NONE,
+                    stopbits=serial.STOPBITS_ONE,
+                    timeout=2
+                )
+                self.logger.info(f"Connected to machine on {self.port}")
+            except Exception as e:
+                self.logger.error(f"Failed to connect to machine: {e}")
+        else:
+            # 在模擬模式下，不嘗試開啟序列埠
+            self.ser = None
+            self.logger.info("MachineController running in simulate mode; serial disabled")
 
     def _send_command(self, cmd):
         """發送指令並等待回應 (ACK 或 完成訊息)
@@ -124,6 +137,28 @@ class MachineController:
                         response = line # Keep updating the last response
                         low = line.lower()
                         
+                        # 即時同步狀態：針對任何指令的回應進行解析，確保狀態與機器實際回應一致
+                        try:
+                            if 'power' in low:
+                                if 'on' in low or 'device power on' in low:
+                                    self.is_sleeping = False
+                                elif 'off' in low or 'power of' in low or 'device power of' in low:
+                                    self.is_sleeping = True
+                            
+                            if 'homed' in low:
+                                self.is_homed = True
+                                self.homing_in_progress = False
+                                self.is_sleeping = False
+                                
+                            if 'opened' in low: # 注意：open 可能是動詞，opened 才是狀態
+                                self.is_sleeping = False
+                                self.is_homed = True
+                                
+                            if 'sleep' in low or 'dep0' in low or 'standby' in low:
+                                self.is_sleeping = True
+                        except Exception:
+                            pass
+
                         # 判斷指令是否完成（較寬鬆的比對）
                         if cmd == "dep1" and "device power on" in low:
                             break
@@ -156,51 +191,99 @@ class MachineController:
                     pass
 
     def init_machine(self):
-        """初始化機器: 啟動電源 (dep1) -> 回 Home (homing)"""
-        resp = self._send_command("dep1")
+        """初始化機器
+        策略：
+        1. 檢查狀態。
+        2. 若狀態為 2 (STATE_HOMED)，則視為已就緒，不進行任何操作。
+        3. 若狀態為 5 (STATE_SLEEPING)，嘗試喚醒 (dep1) 並等待狀態變為 2。
+        4. 若上述皆非，則執行完整初始化流程：dep1 (喚醒) -> homing (歸零)。
+        """
+        self.logger.info("Initializing machine: Checking status first...")
+        
+        try:
+            status_resp = self.get_status()
+            s = str(status_resp).strip()
+            
+            # 若為狀態 2，直接回傳
+            if s.isdigit() and int(s) == self.STATE_HOMED:
+                self.logger.info(f"Machine is already HOMED (state {s}). Initialization skipped.")
+                self.is_homed = True
+                self.initialized = True
+                self.is_sleeping = False
+                return True
+            
+            # 若為狀態 5 (休眠)，嘗試喚醒並檢查是否回到 2
+            if s.isdigit() and int(s) == self.STATE_SLEEPING:
+                self.logger.info("Machine is SLEEPING (state 5). Waking up (dep1)...")
+                self._send_command("dep1")
+                self.is_sleeping = False
+                self.last_action_time = time.time()
+                
+                # 等待一小段時間讓狀態更新
+                time.sleep(1.0)
+                
+                # 再次檢查狀態
+                status_resp = self.get_status()
+                s = str(status_resp).strip()
+                if s.isdigit() and int(s) == self.STATE_HOMED:
+                     self.logger.info(f"Machine woke up to HOMED (state {s}). Initialization skipped.")
+                     self.is_homed = True
+                     self.initialized = True
+                     return True
+                else:
+                     self.logger.info(f"Machine woke up but state is {s} (not 2). Proceeding to homing.")
+                
+        except Exception as e:
+            self.logger.warning(f"init_machine: status check failed: {e}")
+
+        # 若非狀態 2 (或喚醒失敗)，開始初始化
+        self.logger.info("Machine not in HOMED state. Performing full initialization.")
+
+        # 1. 喚醒 (dep1)
+        # 無論目前是否開啟，發送 dep1 確保機器喚醒
+        self.logger.info("Sending 'dep1'...")
+        self._send_command("dep1")
         self.is_sleeping = False
         self.last_action_time = time.time()
         
-        if "device power on" not in resp and "state" not in resp: # Assuming state might be returned on error
-             self.logger.warning(f"Init power on response: {resp}")
-        
+        # 2. 歸零 (homing)
+        self.logger.info("Sending 'homing'...")
         resp = self._send_command("homing")
+        
+        # 判斷歸零是否成功
         homed = False
         try:
-            homed = ("homed" in resp.lower()) or ("ack" in resp.lower())
+            s_resp = str(resp).lower()
+            if "homed" in s_resp or "ack" in s_resp:
+                homed = True
+            
+            # 再次確認狀態
+            if not homed:
+                final_status = self.get_status()
+                if str(final_status).strip() == str(self.STATE_HOMED):
+                    homed = True
         except Exception:
-            homed = False
-        self.is_homed = bool(homed)
-        return homed
+            pass
+
+        self.is_homed = homed
+        self.initialized = True
+        return self.is_homed
 
     def wake_up(self):
-        """喚醒機器 (dep1)，並於背景非同步執行 homing 以回到 Home（避免阻塞使用者介面）。"""
+        """喚醒機器 (dep1)。
+
+        行為：
+        - 發出 dep1 並把 is_sleeping 設為 False。
+        - 依指示：初始化只需開機執行一次，喚醒時僅需傳遞開機指令，不需額外 homing。
+        """
         if self.is_sleeping:
-            self.logger.info("Waking up machine...")
+            self.logger.info("Waking up machine (sending dep1)...")
             self._send_command("dep1")
             self.is_sleeping = False
-
-            # 若尚未在執行 homing，啟動背景執行緒執行 homing
-            if not getattr(self, 'homing_in_progress', False):
-                def do_homing():
-                    try:
-                        self.homing_in_progress = True
-                        self.logger.info("Starting asynchronous homing...")
-                        resp = self._send_command("homing")
-                        self.logger.info(f"Asynchronous homing completed: {resp}")
-                        try:
-                            ok = ("homed" in resp.lower()) or ("ack" in resp.lower())
-                        except Exception:
-                            ok = False
-                        self.is_homed = bool(ok)
-                    except Exception as e:
-                        self.logger.warning(f"Homing after wake failed: {e}")
-                        self.is_homed = False
-                    finally:
-                        self.homing_in_progress = False
-
-                t = threading.Thread(target=do_homing, daemon=True)
-                t.start()
+            
+            # 更新狀態旗標，假設喚醒後為正常待機狀態
+            # 若之前已是 homed，喚醒後理應保持 homed (除非斷電)
+            # 這裡不主動觸發 homing，除非外部顯式呼叫
 
     def check_idle(self):
         """檢查是否閒置超時，若超時則先嘗試回原點（homing）再進入休眠 (dep0)。
@@ -310,9 +393,106 @@ class MachineController:
         return f"been {cmd}" in resp
 
     def get_status(self):
-        """獲取機器狀態"""
-        return self._send_command("state")
+        """獲取機器狀態並同步內部旗標。
         
+        - 會嘗試解析機器回傳的數字狀態（例如 "2"）或文字回應，
+          並更新 self.is_sleeping / self.is_homed / self.homing_in_progress 等旗標，
+          以避免外層因為未同步內部狀態而誤判為 sleeping。
+        - 回傳原始回應（string/int 可接受），不拋出例外。
+        """
+        resp = self._send_command("state")
+        try:
+            s = str(resp).strip() if resp is not None else ""
+            low = s.lower()
+            # 如果回傳純數字（例如 "2"），轉換並同步內部狀態
+            if s.isdigit():
+                code = int(s)
+                # STATE constants 存於實例屬性
+                try:
+                    if code == getattr(self, 'STATE_NOT_INIT', 0):
+                        # 0 = not init：不要把它誤判為休眠，標記為未初始化（非休眠）
+                        self.is_sleeping = False
+                        self.is_homed = False
+                        self.homing_in_progress = False
+                    elif code == getattr(self, 'STATE_POWER_ON_NOT_HOMED', 1):
+                        self.is_sleeping = False
+                        self.is_homed = False
+                        self.homing_in_progress = False
+                    elif code == getattr(self, 'STATE_HOMED', 2):
+                        self.is_sleeping = False
+                        self.is_homed = True
+                        self.homing_in_progress = False
+                    elif code == getattr(self, 'STATE_OPENED', 3):
+                        self.is_sleeping = False
+                        # door open 理當表示不在 homing 且視為就緒
+                        self.is_homed = True
+                        self.homing_in_progress = False
+                    elif code == getattr(self, 'STATE_CLOSED', 4):
+                        self.is_sleeping = False
+                    elif code == 5:
+                        # 部分設備使用 5 表示休眠/待機（device-specific）
+                        self.is_sleeping = True
+                        self.is_homed = False
+                        self.homing_in_progress = False
+                    else:
+                        # 未知 code，保持現狀但嘗試保守處理（不強制喚醒）
+                        self.is_sleeping = False
+                except Exception:
+                    # 若更新旗標失敗，不影響回傳
+                    pass
+                return s
+            # 文字型回應解析（舊設備可能回傳描述字串）
+            # 處理電源/休眠字串：涵蓋「power on / power off / device power on / device power off」
+            try:
+                if 'power' in low:
+                    # 明確包含 on/off
+                    if 'on' in low or 'power on' in low or 'device power on' in low:
+                        self.is_sleeping = False
+                    elif 'off' in low or 'power off' in low or 'device power off' in low or 'device power of' in low or 'power of' in low:
+                        # 部分設備回傳可能有截斷或 typo（如 "device power of"），對此保守視為關機/休眠
+                        self.is_sleeping = True
+                # Homed / ACK 表示已完成 homing，且應為非休眠狀態
+                if 'homed' in low or 'ack' in low:
+                    self.is_homed = True
+                    self.homing_in_progress = False
+                    self.is_sleeping = False
+                # Door open 表示已就緒且非休眠
+                if 'open' in low or 'opened' in low:
+                    self.is_sleeping = False
+                    self.is_homed = True
+                    self.homing_in_progress = False
+                # 明確的休眠/待機字串
+                if 'sleep' in low or 'dep0' in low or 'standby' in low:
+                    self.is_sleeping = True
+            except Exception:
+                # 解析非致命；保留現有狀態
+                pass
+            return resp
+        except Exception as e:
+            try:
+                self.logger.debug(f"get_status parse error: {e}")
+            except Exception:
+                pass
+            return resp
+    
+    def is_door_open(self):
+        """檢查投書口是否為開啟狀態，回傳 bool（使用 get_status 的同步旗標或解析回應）。"""
+        try:
+            # 優先使用已同步的旗標或直接解析 get_status 的回應
+            # 若已知 machine_state（is_homed 與 ser 回應）則可簡短判定
+            resp = self.get_status()
+            s = str(resp).lower() if resp else ""
+            if "open" in s or "opened" in s:
+                return True
+            # 若內部狀態已知且是 homed 且 ser open 但未明確 open，回傳 False（保守）
+            return False
+        except Exception as e:
+            try:
+                self.logger.debug(f"is_door_open probe failed: {e}")
+            except Exception:
+                pass
+            return False
+
     def close(self):
         if self.ser and self.ser.is_open:
             self.ser.close()
@@ -342,4 +522,32 @@ class MachineController:
             return True
         except Exception as e:
             self.logger.error(f"Failed to reconnect serial with new UART settings: {e}")
-            return False
+    def test_connection(self, port, baudrate):
+        """測試 UART 連線 (不影響當前實例狀態)
+        
+        回傳格式統一為 (bool, message)：
+        - (True, "Port opened successfully") 表示可開啟
+        - (False, "<error message>") 表示失敗原因
+        """
+        temp_ser = None
+        try:
+            temp_ser = serial.Serial(
+                port=port,
+                baudrate=baudrate,
+                bytesize=serial.EIGHTBITS,
+                parity=serial.PARITY_NONE,
+                stopbits=serial.STOPBITS_ONE,
+                timeout=2
+            )
+            if temp_ser.is_open:
+                return True, "Port opened successfully"
+            return False, "Failed to open port"
+        except Exception as e:
+            return False, str(e)
+        finally:
+            # 僅關閉序列埠，不要在 finally 裡回傳值，避免覆寫前面的回傳
+            if temp_ser and temp_ser.is_open:
+                try:
+                    temp_ser.close()
+                except Exception:
+                    pass

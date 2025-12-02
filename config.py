@@ -11,6 +11,7 @@ if cfg_file.exists():
         _cfg = {}
 
 # 預設值與對外變數 (向後相容)
+VERSION = "0.61"
 ADMIN_PASSWORD = _cfg.get('admin_password', 'admin')
 BARCODE_LOGIN_ENABLED = bool(_cfg.get('barcode_login_enabled', True))
 REQUIRE_ADMIN_LOGIN = bool(_cfg.get('require_admin_login', False))
@@ -23,6 +24,7 @@ MACHINE_BAUDRATE = int(MACHINE_CONFIG.get('baudrate', 38400))
 LOG_BACKUP_DAYS = int((_cfg.get('logs') or {}).get('backup_days', 30))
 
 LIBRARY_CONFIG = _cfg.get('library', {})
+LIBRARY_MOCK_ENABLED = bool(LIBRARY_CONFIG.get('mock_enabled', False))
 LIBRARY_HOST = LIBRARY_CONFIG.get('host', '192.168.1.100')
 LIBRARY_PORT = int(LIBRARY_CONFIG.get('port', 6001))
 LIBRARY_LOGIN_ENABLED = bool(LIBRARY_CONFIG.get('login_enabled', False))
@@ -34,7 +36,7 @@ LIBRARY_INSTITUTION = LIBRARY_CONFIG.get('institution_id', 'MAIN')
 def reload_config():
     global _cfg, ADMIN_PASSWORD, BARCODE_LOGIN_ENABLED, REQUIRE_ADMIN_LOGIN, MAX_RETURN_LIMIT
     global MACHINE_CONFIG, MACHINE_PORT, MACHINE_BAUDRATE, LOG_BACKUP_DAYS
-    global LIBRARY_CONFIG, LIBRARY_HOST, LIBRARY_PORT, LIBRARY_LOGIN_ENABLED, LIBRARY_USER, LIBRARY_PASS, LIBRARY_INSTITUTION
+    global LIBRARY_CONFIG, LIBRARY_MOCK_ENABLED, LIBRARY_HOST, LIBRARY_PORT, LIBRARY_LOGIN_ENABLED, LIBRARY_USER, LIBRARY_PASS, LIBRARY_INSTITUTION
     
     if cfg_file.exists():
         try:
@@ -53,6 +55,7 @@ def reload_config():
     LOG_BACKUP_DAYS = int((_cfg.get('logs') or {}).get('backup_days', 30))
     
     LIBRARY_CONFIG = _cfg.get('library', {})
+    LIBRARY_MOCK_ENABLED = bool(LIBRARY_CONFIG.get('mock_enabled', False))
     LIBRARY_HOST = LIBRARY_CONFIG.get('host', '192.168.1.100')
     LIBRARY_PORT = int(LIBRARY_CONFIG.get('port', 6001))
     LIBRARY_LOGIN_ENABLED = bool(LIBRARY_CONFIG.get('login_enabled', False))
