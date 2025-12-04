@@ -731,37 +731,25 @@
             await cancelReturn(btn);
         }
 
-        // 取消還書：嘗試關門後立即重置前端狀態（確保 UI 回到首頁）
+        // 取消還書：直接執行 wake_and_home (包含關門與歸零)，確保機器回到 Ready (State 2)
         async function cancelReturn(btn) {
             if (btn) btn.disabled = true;
             showLoading('請勿將手伸入還書箱，以免受傷...');
             try {
-                // 嘗試關門 API
-                let closed = false;
+                // 直接執行 wake_and_home，此指令會讓機器執行 homing (通常包含關門)
+                // 避免先執行 close 導致機器停留在 State 4 而無法順利 homing 或造成流程冗餘
                 try {
-                    const res = await fetch('/api/hardware/close', { method: 'POST' });
-                    const j = await res.json().catch(()=>null);
-                    if (res.ok && (j === null || j.success === undefined || j.success)) closed = true;
-                } catch (e) {
-                    console.warn('close API failed, will fallback to wake_and_home', e);
-                }
-    
-                // 若 close 失敗，改用 wake_and_home 作為保險
-                if (!closed) {
-                    try {
-                        const wakeRes = await fetch('/api/hardware/wake_and_home', { method: 'POST' });
-                        const wakeJson = await wakeRes.json().catch(()=>null);
-                        if (!wakeRes.ok || (wakeJson && wakeJson.success === false)) {
-                            throw new Error((wakeJson && wakeJson.message) || 'wake_and_home failed');
-                        }
-                    } catch (e) {
-                        console.warn('wake_and_home fallback failed', e);
-                        // 繼續重置 UI，但提示管理員
-                        alert('無法確認關門狀態，已重置介面，請聯絡管理員確認機器狀態。');
+                    const wakeRes = await fetch('/api/hardware/wake_and_home', { method: 'POST' });
+                    const wakeJson = await wakeRes.json().catch(()=>null);
+                    if (!wakeRes.ok || (wakeJson && wakeJson.success === false)) {
+                         throw new Error((wakeJson && wakeJson.message) || 'wake_and_home failed');
                     }
+                } catch (e) {
+                    console.warn('wake_and_home failed', e);
+                    alert('機器復歸失敗，請聯絡管理員確認機器狀態。');
                 }
     
-                // 立即重置前端狀態（不再完全依賴 resetFlow，以避免重複呼叫硬體指令）
+                // 立即重置前端狀態
                 clearTimeout(autoRedirectTimer);
                 clearInterval(countdownInterval);
                 scannedBooks = [];

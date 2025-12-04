@@ -34,7 +34,10 @@ class MachineController:
         
         # 閒置休眠設定
         self.last_action_time = time.time()
+        self.last_serial_time = time.time() # 記錄上一次發送指令的時間 (用於指令間隔控制)
+        self.last_cmd = None # 記錄上一個執行的指令
         self.MIN_COMMAND_INTERVAL = 2  # 最少兩秒才可發送下一個控制指令
+        self.STATUS_POLL_INTERVAL = 30 # 狀態輪詢間隔，指令前後需等待此間隔
         self.IDLE_TIMEOUT = 15 * 60 # 15 minutes
         self.is_sleeping = True # 假設初始為休眠，init時會喚醒
         # homing 非同步旗標：喚醒後背景執行 homing 不阻塞呼叫端
@@ -76,17 +79,39 @@ class MachineController:
         if lock:
             lock.acquire()
         try:
+            # 計算距離上次指令的時間 (使用 last_serial_time 確保所有指令都遵循間隔)
             try:
-                elapsed = time.time() - self.last_action_time
+                last_t = getattr(self, 'last_serial_time', 0)
+                if last_t == 0:
+                     # Fallback if not init
+                     last_t = self.last_action_time
+                elapsed = time.time() - last_t
             except Exception:
                 elapsed = getattr(self, 'MIN_COMMAND_INTERVAL', 2)
+
+            # 決定等待時間：
+            # 1. 若當前是 state 指令，需等待 STATUS_POLL_INTERVAL (確保 state 前有 30s 空檔)
+            # 2. 若上一個指令是 state，也需等待 STATUS_POLL_INTERVAL (確保 state 後有 30s 空檔)
+            # 3. 其他情況使用 MIN_COMMAND_INTERVAL
+            poll_interval = getattr(self, 'STATUS_POLL_INTERVAL', 30)
+            min_interval = getattr(self, 'MIN_COMMAND_INTERVAL', 2)
+            last_c = getattr(self, 'last_cmd', None)
+
+            if cmd == "state" or last_c == "state":
+                 required_interval = poll_interval
+            elif last_c == "close":
+                 # 當上一個指令是 close，需要額外等待（依需求描述：額外多等待5秒，不能立刻詢問）
+                 # min_interval 為 2，再加上 5 秒，總共等待 7 秒
+                 required_interval = min_interval + 5
+            else:
+                 required_interval = min_interval
      
-            if elapsed < getattr(self, 'MIN_COMMAND_INTERVAL', 2):
-                wait = getattr(self, 'MIN_COMMAND_INTERVAL', 2) - elapsed
+            if elapsed < required_interval:
+                wait = required_interval - elapsed
                 self.logger.debug(f"Waiting {wait:.2f}s before sending command: {cmd}")
                 time.sleep(wait)
      
-            # 更新最後動作時間 (除了查詢狀態指令外)
+            # 更新最後動作時間 (除了查詢狀態指令外 - 影響休眠邏輯)
             woke = False
             if cmd not in ["state"] and not cmd.startswith("op"):
                 self.last_action_time = time.time()
@@ -182,6 +207,10 @@ class MachineController:
                 time.sleep(0.1)
             
             self.logger.info(f"MachineCommand RECV: {cmd} -> {response}")
+            
+            # 更新指令時間與類型
+            self.last_serial_time = time.time()
+            self.last_cmd = cmd
             return response
         finally:
             if lock:

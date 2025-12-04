@@ -83,9 +83,16 @@
         async function ensureAwakeAndHomedIfNeeded() {
             try {
                 const statusResp = await fetch('/api/status').then(r => r.json()).catch(()=>null);
+                // Debug log for decision making
+                if (statusResp) {
+                    // console.log('[ensureAwake] Status:', statusResp.machine_state, 'Homed:', statusResp.is_homed, 'Prog:', statusResp.homing_in_progress);
+                }
+
                 if (statusResp && statusResp.is_homed && !statusResp.homing_in_progress && statusResp.machine_state !== 'sleeping' && statusResp.machine_state !== 'unavailable') {
                     return { skipped: true, status: statusResp };
                 }
+                
+                console.warn('[ensureAwake] Condition not met, triggering wake_and_home. Status:', statusResp);
         
                 // 需要喚醒並回原點：設定短暫跳過狀態輪詢，執行 API
                 SKIP_STATUS_UNTIL = Date.now() + 10000;
@@ -152,6 +159,25 @@
             if (!bookId) return;
             
             const statusText = document.getElementById('scan-status-text');
+
+            // 限制只能掃描一本 (防止彈跳或多刷)
+            if (scannedBooks.length >= 1) {
+                statusText.textContent = '一次只能歸還一本書，請先完成當前書籍歸還';
+                statusText.style.color = 'orange';
+                setTimeout(() => {
+                    // 若當前還在掃描頁面，恢復提示
+                    if(scannedBooks.length >= 1 && document.getElementById('step-scan').classList.contains('active')) {
+                         // 自動跳轉到確認頁 (如果還沒跳轉)
+                         if(!document.getElementById('step-confirm').classList.contains('active') && !document.getElementById('step-attachment-prompt').classList.contains('active')) {
+                             // do nothing, let the flow continue
+                         }
+                    } else {
+                        statusText.textContent = '系統就緒，請掃描書籍條碼';
+                        statusText.style.color = '#666';
+                    }
+                }, 2000);
+                return;
+            }
     
             // 檢查是否重複掃描
             if (scannedBooks.some(b => b.book_id === bookId)) {
@@ -634,6 +660,16 @@
                         const state = (data.machine_state || '').toLowerCase();
                         const homingFlag = !!data.homing_in_progress;
                         const isHomed = !!data.is_homed;
+
+                        // [Safety Check] 若在首頁 (step-welcome) 且機器處於 State 4 (closed)，自動觸發初始化 (homing)
+                        // 這是為了防止因取消還書或其他操作導致機器停留在 State 4
+                        if (state === 'closed' && !homingFlag) {
+                            const welcomeSection = document.getElementById('step-welcome');
+                            if (welcomeSection && welcomeSection.classList.contains('active')) {
+                                console.log('[Auto-Fix] Detected State 4 (Closed) on Homepage. Triggering wake_and_home...');
+                                fetch('/api/hardware/wake_and_home', { method: 'POST' }).catch(e => console.warn('Auto-Fix homing failed', e));
+                            }
+                        }
     
                         if (state === 'sleeping' || state === 'unavailable') {
                             machDot.style.backgroundColor = '#6c757d';
@@ -719,6 +755,6 @@
             document.addEventListener('keypress', tryWake);
         })();
     
-        // 每 5 秒檢查一次
-        setInterval(checkSystemStatus, 5000);
+        // 每 30 秒檢查一次
+        setInterval(checkSystemStatus, 30000);
     </script>
