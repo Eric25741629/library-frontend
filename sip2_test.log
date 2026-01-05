@@ -1,0 +1,74 @@
+2025-12-30 20:02:00,007 INFO __main__: === 網路連通性測試 ===
+2025-12-30 20:02:05,012 ERROR __main__: ✗ 無法連接到 192.168.1.100:6001
+2025-12-30 20:05:24,689 INFO __main__: === 網路連通性測試 ===
+2025-12-30 20:05:24,690 INFO __main__: ✓ 可以連接到 140.125.246.11:6001
+2025-12-30 20:05:24,690 INFO __main__: === SIP2 連接測試開始 ===
+2025-12-30 20:05:24,691 INFO __main__: 連接參數: 140.125.246.11:6001, Institution: MAIN
+2025-12-30 20:05:24,691 INFO __main__: 登入模式: IP白名單
+2025-12-30 20:05:24,691 INFO __main__: 1. 測試連接...
+2025-12-30 20:05:24,692 INFO sip2_client: Connected to SIP2 server at 140.125.246.11:6001
+2025-12-30 20:05:24,692 INFO __main__: ✓ 連接成功
+2025-12-30 20:05:24,692 INFO __main__: 2. 測試登入...
+2025-12-30 20:05:24,692 INFO sip2_client: Attempting login without credentials (IP whitelist mode)
+2025-12-30 20:05:24,692 INFO sip2_client: SIP2 SEND: 93CN|CO|CPMAIN|AY0<CR>
+2025-12-30 20:05:24,707 INFO sip2_client: SIP2 RECV: 941AY1AZFDFC<CR>
+2025-12-30 20:05:24,707 INFO sip2_client: Login successful (IP whitelist mode)
+2025-12-30 20:05:24,707 INFO __main__: ✓ 登入成功
+2025-12-30 20:05:24,707 INFO __main__: 3. 測試健康檢查...
+2025-12-30 20:05:24,707 INFO sip2_client: SIP2 SEND: 9920251230    200524AOMAIN|AY1<CR>
+2025-12-30 20:05:24,713 INFO sip2_client: SIP2 RECV: 98YYYNNN50000320251230    2005242.00AOHyLib|BXYYYNYYNYYNYNNNNN|AY1AZEDDE<CR>
+2025-12-30 20:05:24,714 INFO __main__: ✓ 健康檢查通過
+2025-12-30 20:05:24,714 INFO __main__: 4. 測試書籍查詢...
+2025-12-30 20:05:24,714 INFO __main__:   查詢條碼: C261954
+2025-12-30 20:05:24,714 INFO sip2_client: Querying book info for barcode: C261954
+2025-12-30 20:05:24,714 INFO sip2_client: SIP2 SEND: 1720251230    200524AOMAIN|ABC261954|<CR>
+2025-12-30 20:05:24,727 INFO sip2_client: SIP2 RECV: 1802010120251230    200524|AAGoogle!Android手機應用程式設計入門|AB|AC蓋索林(Gasolin)編著|AD松崗資產管理|AE9789572241578|CHBOOK 448.845029 8537 102|AFC261954|AG448.845029|AH已被外借|AJ圖書|AK|AL|AM|AN雲林科技大學圖書館|AO0|AP雲林科技大學圖書館|AQ1張光碟片|AR|AY1AZ6A3F<CR>
+2025-12-30 20:05:24,727 INFO sip2_client: Received item info response for C261954
+2025-12-30 20:05:24,727 DEBUG sip2_client: Circulation status: 02 -> On order
+2025-12-30 20:05:24,727 DEBUG sip2_client: Found author: Google!Android手機應用程式設計入門
+2025-12-30 20:05:24,727 DEBUG sip2_client: Found patron: 9789572241578
+2025-12-30 20:05:24,727 DEBUG sip2_client: Found due date: 已被外借
+2025-12-30 20:05:24,728 DEBUG sip2_client: Found title: 圖書
+2025-12-30 20:05:24,728 INFO sip2_client: Successfully parsed book info: 圖書 by Google!Android手機應用程式設計入門
+2025-12-30 20:05:24,728 INFO __main__:   ✓ 書名: 圖書
+2025-12-30 20:05:24,728 INFO __main__:   ✓ 作者: Google!Android手機應用程式設計入門
+2025-12-30 20:05:24,728 INFO __main__:   ✓ 狀態: On order
+2025-12-30 20:05:24,728 INFO __main__:   ✓ 到期日: 已被外借
+2025-12-30 20:05:24,728 INFO __main__: === 測試完成 ===
+2025-12-30 20:06:09,229 INFO __main__: === 網路連通性測試 ===
+2025-12-30 20:06:09,230 INFO __main__: ✓ 可以連接到 140.125.246.11:6001
+2025-12-30 20:06:09,230 INFO __main__: === SIP2 連接測試開始 ===
+2025-12-30 20:06:09,231 INFO __main__: 連接參數: 140.125.246.11:6001, Institution: MAIN
+2025-12-30 20:06:09,231 INFO __main__: 登入模式: IP白名單
+2025-12-30 20:06:09,231 INFO __main__: 1. 測試連接...
+2025-12-30 20:06:09,232 INFO sip2_client: Connected to SIP2 server at 140.125.246.11:6001
+2025-12-30 20:06:09,232 INFO __main__: ✓ 連接成功
+2025-12-30 20:06:09,232 INFO __main__: 2. 測試登入...
+2025-12-30 20:06:09,232 INFO sip2_client: Attempting login without credentials (IP whitelist mode)
+2025-12-30 20:06:09,232 INFO sip2_client: SIP2 SEND: 93CN|CO|CPMAIN|AY0<CR>
+2025-12-30 20:06:09,250 INFO sip2_client: SIP2 RECV: 941AY1AZFDFC<CR>
+2025-12-30 20:06:09,250 INFO sip2_client: Login successful (IP whitelist mode)
+2025-12-30 20:06:09,250 INFO __main__: ✓ 登入成功
+2025-12-30 20:06:09,250 INFO __main__: 3. 測試健康檢查...
+2025-12-30 20:06:09,250 INFO sip2_client: SIP2 SEND: 9920251230    200609AOMAIN|AY1<CR>
+2025-12-30 20:06:09,254 INFO sip2_client: SIP2 RECV: 98YYYNNN50000320251230    2006092.00AOHyLib|BXYYYNYYNYYNYNNNNN|AY1AZEDDA<CR>
+2025-12-30 20:06:09,254 INFO __main__: ✓ 健康檢查通過
+2025-12-30 20:06:09,254 INFO __main__: 4. 測試書籍查詢...
+2025-12-30 20:06:09,254 INFO __main__:   查詢條碼: C261954
+2025-12-30 20:06:09,254 INFO sip2_client: Querying book info for barcode: C261954
+2025-12-30 20:06:09,254 INFO sip2_client: SIP2 SEND: 1720251230    200609AOMAIN|ABC261954|<CR>
+2025-12-30 20:06:09,268 INFO sip2_client: SIP2 RECV: 1802010120251230    200609|AAGoogle!Android手機應用程式設計入門|AB|AC蓋索林(Gasolin)編著|AD松崗資產管理|AE9789572241578|CHBOOK 448.845029 8537 102|AFC261954|AG448.845029|AH已被外借|AJ圖書|AK|AL|AM|AN雲林科技大學圖書館|AO0|AP雲林科技大學圖書館|AQ1張光碟片|AR|AY1AZ6A3B<CR>
+2025-12-30 20:06:09,268 INFO sip2_client: Received item info response for C261954
+2025-12-30 20:06:09,268 DEBUG sip2_client: Circulation status: 02 -> On order
+2025-12-30 20:06:09,268 DEBUG sip2_client: Found title: Google!Android手機應用程式設計入門
+2025-12-30 20:06:09,268 DEBUG sip2_client: Found author: 蓋索林(Gasolin)編著
+2025-12-30 20:06:09,268 DEBUG sip2_client: Found ISBN: 9789572241578
+2025-12-30 20:06:09,268 DEBUG sip2_client: Found CH field: BOOK 448.845029 8537 102
+2025-12-30 20:06:09,268 DEBUG sip2_client: Found due date: 已被外借
+2025-12-30 20:06:09,268 DEBUG sip2_client: Found item type: 圖書
+2025-12-30 20:06:09,268 INFO sip2_client: Successfully parsed book info: Google!Android手機應用程式設計入門 by 蓋索林(Gasolin)編著
+2025-12-30 20:06:09,268 INFO __main__:   ✓ 書名: Google!Android手機應用程式設計入門
+2025-12-30 20:06:09,268 INFO __main__:   ✓ 作者: 蓋索林(Gasolin)編著
+2025-12-30 20:06:09,268 INFO __main__:   ✓ 狀態: On order
+2025-12-30 20:06:09,268 INFO __main__:   ✓ 到期日: 已被外借
+2025-12-30 20:06:09,268 INFO __main__: === 測試完成 ===

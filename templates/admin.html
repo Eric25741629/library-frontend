@@ -612,6 +612,9 @@
                         <button class="control-btn" onclick="sendMachineCommand('put2')">
                             <i class="fas fa-box-open"></i> 分類箱 2
                         </button>
+                        <button class="control-btn" onclick="sendMachineReset()">
+                            <i class="fas fa-sync-alt"></i> 重置
+                        </button>
                     </div>
                     
                     <div style="margin-top: 24px; display: flex; gap: 12px;">
@@ -646,6 +649,9 @@
                     </div>
                     <div class="settings-tab" onclick="switchSettingsTab('machine')">
                         <i class="fas fa-robot"></i> 還書機與硬體
+                    </div>
+                    <div class="settings-tab" onclick="switchSettingsTab('front_images')">
+                        <i class="fas fa-image"></i> 前台介面圖片
                     </div>
                 </div>
 
@@ -748,6 +754,52 @@
                             <i class="fas fa-save"></i> 儲存所有設定
                         </button>
                     </div>
+                    
+                    <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--border-color); display: flex; gap: 12px;">
+                        <button class="btn btn-danger" onclick="disconnectUART()">
+                            <i class="fas fa-unlink"></i> 斷開連線
+                        </button>
+                        <button class="btn btn-secondary" style="background:#e0e5f2; color:#5f6c7b;" onclick="reconnectUART()">
+                            <i class="fas fa-sync"></i> 重新連線
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Frontend Images Settings Tab -->
+                <div id="settings-tab-front_images" class="settings-section">
+                    <h3 style="margin-bottom: 16px; color:var(--text-primary);">前台介面示意圖設定</h3>
+                    <p style="color:var(--text-secondary); font-size:13px; margin-bottom:20px;">可在此上傳「掃描區示意圖」及「放入還書口示意圖」。支援 PNG / JPG / GIF 檔案格式。</p>
+
+                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:24px; align-items:flex-start;">
+                        <div class="form-group">
+                            <label class="form-label">掃描區示意圖 (出現在「請將書本條碼放入掃描區」上方)</label>
+                            <div style="margin-bottom:8px;">
+                                <img id="preview-scan-guide" src="" alt="掃描區示意圖預覽" style="max-width:100%; max-height:180px; border-radius:8px; border:1px solid var(--border-color); object-fit:contain; display:none;">
+                                <div id="preview-scan-guide-empty" style="color:var(--text-secondary); font-size:12px; padding:12px; border-radius:8px; border:1px dashed var(--border-color); text-align:center;">目前使用預設圖示（條碼 Icon）</div>
+                            </div>
+                            <input type="file" id="file-scan-guide" class="form-input" accept="image/png,image/jpeg,image/jpg,image/gif">
+                            <small style="color:var(--text-secondary);">建議解析度：約 800×300，實際顯示會等比例縮放。</small>
+                        </div>
+
+                        <div class="form-group">
+                            <label class="form-label">放入還書口示意圖 (出現在「請將書本放入還書機內」中間)</label>
+                            <div style="margin-bottom:8px;">
+                                <img id="preview-place-book" src="" alt="放書示意圖預覽" style="max-width:100%; max-height:180px; border-radius:8px; border:1px solid var(--border-color); object-fit:contain; display:none;">
+                                <div id="preview-place-book-empty" style="color:var(--text-secondary); font-size:12px; padding:12px; border-radius:8px; border:1px dashed var(--border-color); text-align:center;">目前使用預設 SVG 示意圖</div>
+                            </div>
+                            <input type="file" id="file-place-book" class="form-input" accept="image/png,image/jpeg,image/jpg,image/gif">
+                            <small style="color:var(--text-secondary);">建議解析度：約 800×400，實際顯示會等比例縮放。</small>
+                        </div>
+                    </div>
+
+                    <div style="margin-top: 24px; display:flex; justify-content:flex-end; gap:12px;">
+                        <button class="btn btn-secondary" style="background:#e0e5f2; color:#5f6c7b;" onclick="loadFrontImagesConfig()">
+                            <i class="fas fa-undo"></i> 重新載入目前設定
+                        </button>
+                        <button class="btn btn-primary" onclick="saveFrontImages()">
+                            <i class="fas fa-save"></i> 上傳並儲存圖片
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -796,6 +848,10 @@
             // Update Content sections
             document.querySelectorAll('.settings-section').forEach(el => el.classList.remove('active'));
             document.getElementById(`settings-tab-${tabName}`).classList.add('active');
+
+            if (tabName === 'front_images') {
+                loadFrontImagesConfig();
+            }
         }
 
         // Initialization
@@ -877,7 +933,7 @@
             // 狀態更新頻率加快，且在各頁面都更新
             // 注意：fetchStatus 會更新儀表板(stat-card)以及機器控制(machine-control-state)兩處的狀態
             fetchStatus();
-        }, 30000);
+        }, 15000);
 
         // --- Logic Functions (Same as before, adapted for new UI) ---
 
@@ -1019,10 +1075,7 @@
 
                 tr.innerHTML = `
                     <td>#${log.id}</td>
-                    <td style="display:flex; align-items:center; gap:12px;">
-                        <img src="${log.image_url}" class="book-img" alt="Cover">
-                        <span style="font-weight:500;">${log.title}</span>
-                    </td>
+                    <td><span style="font-weight:500;">${log.title}</span></td>
                     <td><span style="font-family:monospace; background:#f4f7f6; padding:4px 8px; border-radius:6px;">${log.book_id}</span></td>
                     <td>${log.return_time}</td>
                     <td>${lastColumnContent}</td>
@@ -1073,10 +1126,12 @@
             respEl.scrollTop = respEl.scrollHeight;
 
             try {
+                // 若使用者點選的是 close，改為發送 cancel 指令以符合故障處理流程
+                const sendCmd = (cmd === 'close') ? 'cancel' : cmd;
                 const res = await fetch('/api/admin/send_command', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ cmd })
+                    body: JSON.stringify({ cmd: sendCmd })
                 });
                 
                 if (res.status === 401) {
@@ -1108,11 +1163,115 @@
             }
         }
 
+        // --- Frontend Images Config ---
+        async function loadFrontImagesConfig() {
+            try {
+                const res = await fetch('/api/admin/get_front_images');
+                const data = await res.json();
+                if (!data.success) return;
+
+                const images = data.images || {};
+
+                const scanPath = images.scan_guide;
+                const placePath = images.place_book_guide;
+
+                const scanImg = document.getElementById('preview-scan-guide');
+                const scanEmpty = document.getElementById('preview-scan-guide-empty');
+                const placeImg = document.getElementById('preview-place-book');
+                const placeEmpty = document.getElementById('preview-place-book-empty');
+
+                function applyPreview(imgEl, emptyEl, relPath) {
+                    if (!imgEl || !emptyEl) return;
+                    if (relPath) {
+                        imgEl.src = `/static/${relPath}`;
+                        imgEl.style.display = 'block';
+                        emptyEl.style.display = 'none';
+                    } else {
+                        imgEl.src = '';
+                        imgEl.style.display = 'none';
+                        emptyEl.style.display = 'block';
+                    }
+                }
+
+                applyPreview(scanImg, scanEmpty, scanPath);
+                applyPreview(placeImg, placeEmpty, placePath);
+            } catch (e) {
+                console.error('loadFrontImagesConfig error', e);
+            }
+        }
+
+        async function saveFrontImages() {
+            const fileScan = document.getElementById('file-scan-guide').files[0];
+            const filePlace = document.getElementById('file-place-book').files[0];
+
+            if (!fileScan && !filePlace) {
+                alert('請至少選擇一張要上傳的圖片');
+                return;
+            }
+
+            const formData = new FormData();
+            if (fileScan) formData.append('scan_guide', fileScan);
+            if (filePlace) formData.append('place_book_guide', filePlace);
+
+            showLoadingOverlay(true);
+            try {
+                const res = await fetch('/api/admin/upload_front_images', {
+                    method: 'POST',
+                    body: formData
+                });
+                const data = await res.json();
+                if (!res.ok || !data.success) {
+                    alert(data.message || '圖片上傳失敗');
+                    return;
+                }
+                alert('圖片已成功儲存');
+                loadFrontImagesConfig();
+            } catch (e) {
+                console.error('saveFrontImages error', e);
+                alert('圖片上傳時發生錯誤');
+            } finally {
+                showLoadingOverlay(false);
+            }
+        }
+
+        function showLoadingOverlay(show) {
+            const overlay = document.getElementById('loading-overlay');
+            if (!overlay) return;
+            overlay.style.display = show ? 'flex' : 'none';
+        }
+
         function sendCustom() {
             const cmd = document.getElementById('custom-cmd').value.trim();
             if(cmd) {
                 sendMachineCommand(cmd);
                 document.getElementById('custom-cmd').value = '';
+            }
+        }
+
+        // Reset sequence for stuck books: call hardware reset API
+        async function sendMachineReset() {
+            const respEl = document.getElementById('machine-response');
+            const buttons = document.querySelectorAll('.control-btn, .btn-primary');
+            buttons.forEach(btn => btn.disabled = true);
+            respEl.value += `\n> Sending: reset...`;
+            respEl.scrollTop = respEl.scrollHeight;
+            try {
+                const res = await fetch('/api/hardware/reset', { method: 'POST' });
+                if (res.status === 401) { window.location.href = '/login'; return; }
+                const j = await res.json().catch(() => ({}));
+                const time = new Date().toLocaleTimeString();
+                if (j.success) {
+                    respEl.value += `\n[${time}] RESET: ${j.message} ${j.responses ? JSON.stringify(j.responses) : ''}`;
+                } else {
+                    respEl.value += `\n[${time}] RESET ERROR: ${j.message || 'Unknown'}`;
+                }
+                respEl.scrollTop = respEl.scrollHeight;
+            } catch (e) {
+                console.error(e);
+                respEl.value += `\nEXCEPTION: ${e}`;
+                respEl.scrollTop = respEl.scrollHeight;
+            } finally {
+                buttons.forEach(btn => btn.disabled = false);
             }
         }
 
@@ -1183,6 +1342,45 @@
                 }
             } catch(e) {
                 alert('測試請求失敗: ' + e);
+            }
+            showLoading(false);
+        }
+
+        async function disconnectUART() {
+            if(!confirm('確定要斷開與機器的 UART 連線嗎？機器將無法回應指令。')) return;
+            showLoading(true);
+            try {
+                const res = await fetch('/api/admin/disconnect_uart', { method: 'POST' });
+                const data = await res.json();
+                alert(data.message);
+                
+                const respEl = document.getElementById('machine-response');
+                const time = new Date().toLocaleTimeString();
+                respEl.value += `\n[${time}] DISCONNECTED: ${data.message}`;
+                respEl.scrollTop = respEl.scrollHeight;
+            } catch(e) {
+                alert('斷線請求失敗: ' + e);
+            }
+            showLoading(false);
+        }
+
+        async function reconnectUART() {
+            showLoading(true);
+            try {
+                const res = await fetch('/api/admin/reconnect_uart', { method: 'POST' });
+                const data = await res.json();
+                alert(data.message);
+                
+                const respEl = document.getElementById('machine-response');
+                const time = new Date().toLocaleTimeString();
+                if(data.success) {
+                     respEl.value += `\n[${time}] RECONNECTED: ${data.message}`;
+                } else {
+                     respEl.value += `\n[${time}] RECONNECT FAILED: ${data.message}`;
+                }
+                respEl.scrollTop = respEl.scrollHeight;
+            } catch(e) {
+                alert('重連請求失敗: ' + e);
             }
             showLoading(false);
         }

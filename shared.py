@@ -159,6 +159,7 @@ def init_sip2_client():
     logger.info(f"Initializing SIP2 Client: {host}:{port}, Inst={inst}, Mock={mock_enabled}")
     
     if mock_enabled or str(host).lower() == 'mock':
+        logger.info("Using MockSIP2Client")
         sip2 = MockSIP2Client(host, port, user, pwd, institution_id=inst)
     else:
         try:
@@ -166,12 +167,20 @@ def init_sip2_client():
                 try: sip2.close()
                 except: pass
             
+            logger.info("Creating real SIP2Client")
             sip2 = SIP2Client(host, port, user, pwd, institution_id=inst)
             # 嘗試連線
             if sip2.connect():
-                sip2.login()
+                logger.info("SIP2 connection successful")
+                if sip2.login():
+                    logger.info("SIP2 login successful")
+                else:
+                    logger.warning("SIP2 login failed")
+            else:
+                logger.error("SIP2 connection failed")
         except Exception as e:
             logger.error(f"Failed to init SIP2 client: {e}")
+            sip2 = None
 
 # --- 背景任務 ---
 def init_machine_async():

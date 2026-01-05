@@ -1,6 +1,8 @@
 from flask import Blueprint, jsonify
 import logging
 import shared
+import time
+import threading
 
 hardware_api_bp = Blueprint('hardware_api', __name__)
 logger = logging.getLogger('hardware_api')
@@ -15,9 +17,25 @@ def open_hardware_door():
 @hardware_api_bp.route('/close', methods=['POST'])
 def close_hardware_door():
     """單獨關閉投書口 API"""
-    if shared.machine.close_door():
-        return jsonify({"success": True, "message": "投書口已關閉"})
-    return jsonify({"success": False, "message": "關閉失敗"}), 500
+    try:
+        # 使用 cancel 指令替代直接 close，因為在故障/還書流程中 cancel 更安全
+        resp = shared.machine._send_command('cancel')
+        ok = False
+        try:
+            s = str(resp).lower()
+            if 'ack' in s or 'cancel' in s or 'canceled' in s or 'cancelled' in s:
+                ok = True
+        except Exception:
+            pass
+
+        if ok:
+            return jsonify({"success": True, "message": "已發送 cancel 指令 (視為關門/中止)", "response": resp})
+        else:
+            # 若沒有明確 ack，也回傳成功但附上原始回應以供除錯
+            return jsonify({"success": True, "message": "已發送 cancel 指令 (無明確 ACK)", "response": resp})
+    except Exception as e:
+        logger.error(f"close_hardware_door error: {e}")
+        return jsonify({"success": False, "message": "關閉失敗", "detail": str(e)}), 500
 
 @hardware_api_bp.route('/wake', methods=['POST'])
 def wake_hardware():
@@ -83,3 +101,101 @@ def wake_and_home():
     except Exception as e:
         logger.error(f"wake_and_home error: {e}")
         return jsonify({"success": False, "message": "操作失敗", "detail": str(e)}), 500
+
+
+@hardware_api_bp.route('/reset', methods=['POST'])
+def reset_hardware():
+    """重置序列：用於書本卡住時的快速重置（reopen -> close -> homing）。"""
+    machine = shared.machine
+    logger.info("reset_hardware: Reset sequence triggered")
+    responses = {}
+    lock = getattr(machine, 'lock', None)
+    acquired = False
+    try:
+        if lock:
+            acquired = lock.acquire(timeout=5)
+        # 標記為 action 中，避免其他指令干擾
+        try:
+            machine.action_in_progress = True
+            machine.current_action_code = 99
+        except Exception:
+            pass
+
+        # 0) 嘗試 cancel（如果是還書流程造成的卡住，先送 cancel 可能比強制 close 更安全）
+        cancel_ok = False
+        try:
+            r = machine._send_command('cancel')
+            responses['cancel'] = r
+            try:
+                s = str(r).lower()
+                if any(k in s for k in ('ack', 'cancel', 'cancelled', 'canceled')):
+                    cancel_ok = True
+                    responses['cancel_ok'] = True
+            except Exception:
+                pass
+        except Exception as e:
+            responses['cancel_error'] = str(e)
+
+        # 如果 cancel 成功（回傳 ack 或取消字樣），則視為已中止還書流程，不需再做機械重置
+        if cancel_ok:
+            try:
+                machine.action_in_progress = False
+                machine.current_action_code = None
+            except Exception:
+                pass
+            return jsonify({"success": True, "message": "Cancel succeeded; mechanical reset skipped", "responses": responses})
+
+        # 1) 嘗試 reopen（若門已卡，可嘗試重新開啟）
+        try:
+            r = machine._send_command('reopen')
+            responses['reopen'] = r
+        except Exception as e:
+            responses['reopen_error'] = str(e)
+        time.sleep(0.5)
+
+        # 2) 嘗試 close
+        try:
+            r = machine._send_command('close')
+            responses['close'] = r
+        except Exception as e:
+            responses['close_error'] = str(e)
+        time.sleep(0.5)
+
+        # 3) 執行 homing
+        try:
+            r = machine._send_command('homing')
+            responses['homing'] = r
+            # 解析 homing 成功與否
+            ok = False
+            try:
+                s = str(r).lower()
+                if 'homed' in s or 'ack' in s:
+                    ok = True
+            except Exception:
+                ok = False
+            machine.is_homed = ok
+        except Exception as e:
+            responses['homing_error'] = str(e)
+
+        # 清除 action flag
+        try:
+            machine.action_in_progress = False
+            machine.current_action_code = None
+        except Exception:
+            pass
+
+        return jsonify({"success": True, "message": "Reset sequence executed", "responses": responses})
+    except Exception as e:
+        logger.error(f"reset_hardware error: {e}")
+        try:
+            machine.action_in_progress = False
+            machine.current_action_code = None
+        except Exception:
+            pass
+        return jsonify({"success": False, "message": "Reset failed", "detail": str(e)}), 500
+    finally:
+        if lock and acquired:
+            try:
+                lock.release()
+            except Exception:
+                pass

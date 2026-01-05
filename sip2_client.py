@@ -41,8 +41,10 @@ class SIP2Client:
         message += '\r'
         
         try:
+            self.logger.info(f"SIP2 SEND: {message.replace(chr(13), '<CR>')}")  
             self.sock.sendall(message.encode('utf-8'))
             response = self.sock.recv(1024).decode('utf-8')
+            self.logger.info(f"SIP2 RECV: {response.replace(chr(13), '<CR>')}")  
             return response
         except Exception as e:
             self.logger.error(f"Socket error: {e}")
@@ -58,63 +60,119 @@ class SIP2Client:
         """
         inst = self.institution_id or 'MAIN'
         
-        # 1) 完全無帳號密碼：走「IP 白名單」模式
-        if not self.login_user and not self.login_pass:
-            msg = f"93CN|CO|CP{inst}|AY0"
+        try:
+            # 1) 完全無帳號密碼：走「IP 白名單」模式
+            if not self.login_user and not self.login_pass:
+                self.logger.info("Attempting login without credentials (IP whitelist mode)") 
+                msg = f"93CN|CO|CP{inst}|AY0"
+                resp = self._send_message(msg)
+                if resp and resp.startswith('94'):
+                    self.logger.info("Login successful (IP whitelist mode)")
+                    return True
+                self.logger.error(f"Login failed (IP whitelist mode), response: {resp}")
+                return False
+
+            # 2) 有帳號密碼：走標準 93 格式
+            # 注意：某些 SIP2 Server 即使有帳號密碼，也需要 CP 欄位 (Institution Id)
+            self.logger.info(f"Attempting login with credentials for user: {self.login_user}")
+            uid_algo = '0'
+            pwd_algo = '0'
+            pwd_field = f"CO{self.login_pass}|" if self.login_pass else "CO|"
+            msg = f"93{uid_algo}{pwd_algo}CN{self.login_user}|{pwd_field}CP{inst}|"
             resp = self._send_message(msg)
             if resp and resp.startswith('94'):
+                # 通常 resp[2] == '1' 代表 OK，你也可以再細判
+                self.logger.info(f"Login successful with credentials, response: {resp[2] if len(resp) > 2 else 'N/A'}")
                 return True
+            self.logger.error(f"Login failed with credentials, response: {resp}")
             return False
-
-        # 2) 有帳號密碼：走標準 93 格式
-        # 注意：某些 SIP2 Server 即使有帳號密碼，也需要 CP 欄位 (Institution Id)
-        uid_algo = '0'
-        pwd_algo = '0'
-        pwd_field = f"CO{self.login_pass}|" if self.login_pass else "CO|"
-        msg = f"93{uid_algo}{pwd_algo}CN{self.login_user}|{pwd_field}CP{inst}|"
-        resp = self._send_message(msg)
-        if resp and resp.startswith('94'):
-            # 通常 resp[2] == '1' 代表 OK，你也可以再細判
-            return True
-        return False
+        except Exception as e:
+            self.logger.error(f"Login exception: {e}")
+            return False
 
     def get_book_info(self, barcode):
         """17 Item Information"""
-        # 17<Date><AO Institution Id><AB Item Identifier><AC Terminal Password>...
-        now = datetime.datetime.now().strftime("%Y%m%d    %H%M%S")
-        inst = self.institution_id or 'MAIN'
-        msg = f"17{now}AO{inst}|AB{barcode}|"
-        
-        resp = self._send_message(msg)
-        if not resp: return None
+        try:
+            # 17<Date><AO Institution Id><AB Item Identifier><AC Terminal Password>...
+            now = datetime.datetime.now().strftime("%Y%m%d    %H%M%S")
+            inst = self.institution_id or 'MAIN'
+            msg = f"17{now}AO{inst}|AB{barcode}|"
+            
+            self.logger.info(f"Querying book info for barcode: {barcode}")
+            resp = self._send_message(msg)
+            if not resp: 
+                self.logger.error("No response from SIP2 server")
+                return None
 
-        # Parse 18 Item Information Response
-        # 18<Circulation Status><Security Marker>...
-        # Fixed length fields first
-        if not resp.startswith('18'): return None
-        
-        # Simple parsing logic (SIP2 is positional + variable fields)
-        # We need to extract Title (AJ), Author (AA), Due Date (AH), Patron Name (AE)
-        data = {
-            "barcode": barcode,
-            "title": "Unknown Title",
-            "author": "Unknown Author",
-            "status": "Unknown",
-            "due_date": None,
-            "patron_name": None,
-            "has_attachment": False # Default to False
-        }
-        
-        parts = resp.split('|')
-        for part in parts:
-            if part.startswith('AJ'): data['title'] = part[2:]
-            elif part.startswith('AA'): data['author'] = part[2:]
-            elif part.startswith('AH'): data['due_date'] = part[2:].strip() # Due Date
-            elif part.startswith('AE'): data['patron_name'] = part[2:] # Patron Name
-            # Example field for attachment - adjust based on actual SIP2 field (e.g. BQ or CK)
-            # elif part.startswith('BQ'): data['has_attachment'] = 'attachment' in part[2:].lower()
-        
-        return data
+            # Parse 18 Item Information Response
+            # 18<Circulation Status><Security Marker>...
+            # Fixed length fields first
+            if not resp.startswith('18'): 
+                self.logger.error(f"Unexpected response format: {resp[:20]}...")
+                return None
+            
+            self.logger.info(f"Received item info response for {barcode}")
+            
+            # Simple parsing logic (SIP2 is positional + variable fields)
+            # We need to extract Title (AJ), Author (AA), Due Date (AH), Patron Name (AE)
+            data = {
+                "barcode": barcode,
+                "title": "Unknown Title",
+                "author": "Unknown Author",
+                "status": "Unknown",
+                "due_date": None,
+                "patron_name": None,
+                "has_attachment": False # Default to False
+            }
+            
+            # 解析回應的固定長度欄位
+            if len(resp) >= 4:
+                circulation_status = resp[2:4]
+                # Circulation Status 代碼對照：
+                # 01 = Other, 02 = On order, 03 = Available, 04 = Charged, 05 = Charged; not to be recalled, etc.
+                status_map = {
+                    '01': 'Other', '02': 'On order', '03': 'Available', 
+                    '04': 'Charged', '05': 'Charged; not to be recalled',
+                    '06': 'In process', '07': 'Recalled', '08': 'Waiting on hold shelf',
+                    '09': 'Waiting to be re-shelved', '10': 'In transit between library locations',
+                    '11': 'Claimed returned', '12': 'Lost', '13': 'Missing'
+                }
+                data['status'] = status_map.get(circulation_status, f'Unknown ({circulation_status})')
+                self.logger.debug(f"Circulation status: {circulation_status} -> {data['status']}")
+            
+            parts = resp.split('|')
+            for part in parts:
+                if part.startswith('AA'): 
+                    # AA 欄位包含書名
+                    data['title'] = part[2:]
+                    self.logger.debug(f"Found title: {data['title']}")
+                elif part.startswith('AC'): 
+                    # AC 通常是作者欄位
+                    data['author'] = part[2:]
+                    self.logger.debug(f"Found author: {data['author']}")
+                elif part.startswith('AH'): 
+                    data['due_date'] = part[2:].strip() # Due Date
+                    self.logger.debug(f"Found due date: {data['due_date']}")
+                elif part.startswith('AJ'): 
+                    # AJ 在這個系統中是資料類型，不是書名
+                    item_type = part[2:]
+                    self.logger.debug(f"Found item type: {item_type}")
+                elif part.startswith('AE'): 
+                    # AE 在這個系統中是 ISBN
+                    isbn = part[2:]
+                    self.logger.debug(f"Found ISBN: {isbn}")
+                elif part.startswith('CH'): 
+                    # CH 欄位可能包含索書號等資訊
+                    ch_content = part[2:]
+                    self.logger.debug(f"Found CH field: {ch_content}")
+                # Example field for attachment - adjust based on actual SIP2 field (e.g. BQ or CK)
+                # elif part.startswith('BQ'): data['has_attachment'] = 'attachment' in part[2:].lower()
+            
+            self.logger.info(f"Successfully parsed book info: {data['title']} by {data['author']}")
+            return data
+        except Exception as e:
+            self.logger.error(f"Exception in get_book_info: {e}")
+            return None
 
     def checkin_book(self, barcode):
         """09 Checkin"""

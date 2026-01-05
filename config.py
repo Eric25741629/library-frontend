@@ -11,7 +11,7 @@ if cfg_file.exists():
         _cfg = {}
 
 # 預設值與對外變數 (向後相容)
-VERSION = "0.61"
+VERSION = "0.70"
 ADMIN_PASSWORD = _cfg.get('admin_password', 'admin')
 BARCODE_LOGIN_ENABLED = bool(_cfg.get('barcode_login_enabled', True))
 REQUIRE_ADMIN_LOGIN = bool(_cfg.get('require_admin_login', False))
@@ -31,6 +31,7 @@ LIBRARY_LOGIN_ENABLED = bool(LIBRARY_CONFIG.get('login_enabled', False))
 LIBRARY_USER = LIBRARY_CONFIG.get('login_user', '')
 LIBRARY_PASS = LIBRARY_CONFIG.get('login_pass', '')
 LIBRARY_INSTITUTION = LIBRARY_CONFIG.get('institution_id', 'MAIN')
+LIBRARY_CHECKIN_ENABLED = bool(LIBRARY_CONFIG.get('checkin_enabled', False))
 
 # 重新載入函式（如需在執行時重讀設定）
 def reload_config():
@@ -62,3 +63,4 @@ def reload_config():
     LIBRARY_USER = LIBRARY_CONFIG.get('login_user', '')
     LIBRARY_PASS = LIBRARY_CONFIG.get('login_pass', '')
     LIBRARY_INSTITUTION = LIBRARY_CONFIG.get('institution_id', 'MAIN')
+    LIBRARY_CHECKIN_ENABLED = bool(LIBRARY_CONFIG.get('checkin_enabled', False))

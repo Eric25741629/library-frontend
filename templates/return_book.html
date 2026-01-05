@@ -63,14 +63,18 @@
             
             <div class="scan-area-container">
                 <div class="scan-box" id="main-scan-box">
-                    <i class="fas fa-barcode" style="font-size: 8rem; color: #d1d9e6;"></i>
+                    {% if scan_guide_image %}
+                        <img src="{{ url_for('static', filename=scan_guide_image) }}" alt="掃描示意圖" style="max-width:100%; max-height:100%; object-fit:contain;">
+                    {% else %}
+                        <i class="fas fa-barcode" style="font-size: 8rem; color: #d1d9e6;"></i>
+                    {% endif %}
                 </div>
             </div>
             
             <p class="scan-status" id="scan-status-text">系統就緒，請掃描書籍條碼</p>
 
-            <!-- 真實掃描輸入框：移除 readonly 以允許輸入，但使用 inputmode="none" 降低虛擬鍵盤彈出 -->
-            <input type="text" id="barcode-input" class="barcode-input-field" placeholder="請使用掃描器或實體鍵盤掃描" autocomplete="off" inputmode="none" tabindex="-1">
+            <!-- 真實掃描輸入框：使用 readonly 以避免虛擬鍵盤彈出，透過全域 keydown 監聽掃描輸入 -->
+            <input type="text" id="barcode-input" class="barcode-input-field" placeholder="請使用掃描器或實體鍵盤掃描" autocomplete="off" inputmode="none" tabindex="-1" readonly>
 
             <div class="action-buttons">
                 <button class="btn-danger btn-medium" onclick="resetFlow(this)">
@@ -102,58 +106,62 @@
             
             <div class="place-book-instruction">
                 <div class="place-book-anim-container">
-                    <!-- 書背朝向機器示意圖 -->
-                    <div class="book-spine-guide">
-                        <div class="guide-machine">
-                            <span class="machine-label">還書口內部</span>
-                        </div>
-                        <div class="guide-book-3d-container">
-                            <!-- SVG 平放書本示意圖 (Top-down view) -->
-                            <svg width="200" height="200" viewBox="0 0 260 260" class="book-svg">
-                                <defs>
-                                    <filter id="flatShadow" x="-20%" y="-20%" width="140%" height="140%">
-                                        <feGaussianBlur in="SourceAlpha" stdDeviation="4"/>
-                                        <feOffset dx="0" dy="4" result="offsetblur"/>
-                                        <feComponentTransfer>
-                                            <feFuncA type="linear" slope="0.15"/>
-                                        </feComponentTransfer>
-                                        <feMerge>
-                                            <feMergeNode/>
-                                            <feMergeNode in="SourceGraphic"/>
-                                        </feMerge>
-                                    </filter>
-                                </defs>
-                                
-                                <!-- 指示箭頭 (位於書本上方，指示方向) -->
-                                <g class="guide-arrow-svg">
-                                    <path d="M130,10 L130,50 M130,10 L110,30 M130,10 L150,30" stroke="#007bff" stroke-width="8" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-                                </g>
+                    {% if place_book_guide_image %}
+                        <img src="{{ url_for('static', filename=place_book_guide_image) }}" alt="放書示意圖" style="max-width:100%; max-height:260px; object-fit:contain; margin-bottom:1rem;">
+                    {% else %}
+                        <!-- 原本的書背朝向機器 SVG 示意圖 -->
+                        <div class="book-spine-guide">
+                            <div class="guide-machine">
+                                <span class="machine-label">還書口內部</span>
+                            </div>
+                            <div class="guide-book-3d-container">
+                                <!-- SVG 平放書本示意圖 (Top-down view) -->
+                                <svg width="200" height="200" viewBox="0 0 260 260" class="book-svg">
+                                    <defs>
+                                        <filter id="flatShadow" x="-20%" y="-20%" width="140%" height="140%">
+                                            <feGaussianBlur in="SourceAlpha" stdDeviation="4"/>
+                                            <feOffset dx="0" dy="4" result="offsetblur"/>
+                                            <feComponentTransfer>
+                                                <feFuncA type="linear" slope="0.15"/>
+                                            </feComponentTransfer>
+                                            <feMerge>
+                                                <feMergeNode/>
+                                                <feMergeNode in="SourceGraphic"/>
+                                            </feMerge>
+                                        </filter>
+                                    </defs>
+                                    
+                                    <!-- 指示箭頭 (位於書本上方，指示方向) -->
+                                    <g class="guide-arrow-svg">
+                                        <path d="M130,10 L130,50 M130,10 L110,30 M130,10 L150,30" stroke="#007bff" stroke-width="8" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+                                    </g>
 
-                                <!-- 書本主體 (平放) -->
-                                <g transform="translate(50, 60)" filter="url(#flatShadow)">
-                                    <!-- 書本輪廓 (包含書背與封面) -->
-                                    <rect x="0" y="0" width="160" height="180" rx="4" ry="4" fill="#ffffff" stroke="#ced4da" stroke-width="1"/>
-                                    
-                                    <!-- 書背區域 (Top Spine) -->
-                                    <path d="M1,4 L1,30 L159,30 L159,4 Q159,1 156,1 L4,1 Q1,1 1,4 Z" fill="#007bff"/>
-                                    
-                                    <!-- 書背文字 -->
-                                    <text x="80" y="22" font-family="Noto Sans TC, sans-serif" font-size="16" font-weight="bold" fill="white" text-anchor="middle" letter-spacing="2">書背</text>
-                                    
-                                    <!-- 封面裝飾 (模擬書本質感) -->
-                                    <rect x="20" y="50" width="120" height="10" rx="2" fill="#f1f3f5"/>
-                                    <rect x="20" y="70" width="80" height="6" rx="2" fill="#f1f3f5"/>
-                                    
-                                    <!-- 書本底部頁面效果 (Bottom Pages) -->
-                                    <path d="M4,180 L156,180 L152,188 L8,188 Z" fill="#e9ecef" stroke="#dee2e6" stroke-width="1"/>
-                                    <line x1="20" y1="183" x2="140" y2="183" stroke="#adb5bd" stroke-width="0.5"/>
-                                </g>
-                            </svg>
+                                    <!-- 書本主體 (平放) -->
+                                    <g transform="translate(50, 60)" filter="url(#flatShadow)">
+                                        <!-- 書本輪廓 (包含書背與封面) -->
+                                        <rect x="0" y="0" width="160" height="180" rx="4" ry="4" fill="#ffffff" stroke="#ced4da" stroke-width="1"/>
+                                        
+                                        <!-- 書背區域 (Top Spine) -->
+                                        <path d="M1,4 L1,30 L159,30 L159,4 Q159,1 156,1 L4,1 Q1,1 1,4 Z" fill="#007bff"/>
+                                        
+                                        <!-- 書背文字 -->
+                                        <text x="80" y="22" font-family="Noto Sans TC, sans-serif" font-size="16" font-weight="bold" fill="white" text-anchor="middle" letter-spacing="2">書背</text>
+                                        
+                                        <!-- 封面裝飾 (模擬書本質感) -->
+                                        <rect x="20" y="50" width="120" height="10" rx="2" fill="#f1f3f5"/>
+                                        <rect x="20" y="70" width="80" height="6" rx="2" fill="#f1f3f5"/>
+                                        
+                                        <!-- 書本底部頁面效果 (Bottom Pages) -->
+                                        <path d="M4,180 L156,180 L152,188 L8,188 Z" fill="#e9ecef" stroke="#dee2e6" stroke-width="1"/>
+                                        <line x1="20" y1="183" x2="140" y2="183" stroke="#adb5bd" stroke-width="0.5"/>
+                                    </g>
+                                </svg>
+                            </div>
+                            <div class="guide-user">
+                                <span class="user-label">您的位置</span>
+                            </div>
                         </div>
-                        <div class="guide-user">
-                            <span class="user-label">您的位置</span>
-                        </div>
-                    </div>
+                    {% endif %}
                 </div>
                 <p style="font-size: 1.3rem; color: #555; margin-bottom: 0.5rem;">請確認書籍已放入</p>
                 <p style="font-size: 1.2rem; color: #c0392b; margin-bottom: 1rem; font-weight: bold;">
@@ -207,7 +215,7 @@
             
             <p class="scan-status" id="scan-attachment-status-text">請掃描附件上的條碼進行核對</p>
 
-            <input type="text" id="attachment-barcode-input" class="barcode-input-field" placeholder="掃描附件條碼..." autocomplete="off">
+            <input type="text" id="attachment-barcode-input" class="barcode-input-field" placeholder="掃描附件條碼..." autocomplete="off" readonly>
         </section>
 
         <!-- Step 3.7: Insert Attachment Instruction -->
@@ -294,6 +302,7 @@
 
     <script>
         let scannedBooks = [];
+        let isScanning = false; // 掃描鎖定旗標，防止快速重複輸入
         let currentProcessingBook = null; // 當前正在處理含附件的書籍
         let currentAttachmentBarcode = null; // 已掃描的附件條碼（送至後端驗證）
         
@@ -380,13 +389,13 @@
             if (stepId === 'step-scan') {
                 const input = document.getElementById('barcode-input');
                 input.value = '';
-                input.focus();
+                // input.focus(); // 移除 focus 以避免觸發虛擬鍵盤
                 document.getElementById('main-scan-box').classList.add('active');
             } else if (stepId === 'step-scan-attachment') {
                 const input = document.getElementById('attachment-barcode-input');
                 if(input) {
                     input.value = '';
-                    setTimeout(() => input.focus(), 100);
+                    // setTimeout(() => input.focus(), 100); // 移除 focus 以避免觸發虛擬鍵盤
                 }
             }
         }
@@ -453,6 +462,7 @@
             clearInterval(countdownInterval);
     
             scannedBooks = [];
+            isScanning = false;
             currentProcessingBook = null;
             updateBookList();
             nextStep('step-welcome');
@@ -464,18 +474,21 @@
         async function handleScan(bookId) {
             if (!bookId) return;
             
+            // 防止快速輸入導致的並發請求
+            if (isScanning) return;
+
             const statusText = document.getElementById('scan-status-text');
 
-            // 檢查是否重複掃描
-            if (scannedBooks.some(b => b.book_id === bookId)) {
-                statusText.textContent = '此書籍已在清單中';
+            // 嚴格限制：一次只能還一本書
+            if (scannedBooks.length >= 1) {
+                statusText.textContent = '一次只能歸還一本書';
                 statusText.style.color = 'orange';
-                setTimeout(() => {
-                    statusText.textContent = '系統就緒，請掃描書籍條碼';
-                    statusText.style.color = '#666';
-                }, 2000);
+                // 不自動重置為就緒，保持提示狀態直到使用者操作下一步或重置
                 return;
             }
+            
+            // 鎖定掃描狀態
+            isScanning = true;
             
             document.getElementById('main-scan-box').classList.add('active');
 
@@ -518,6 +531,7 @@
                         setTimeout(() => {
                             resetFlow(); // 5秒後跳回首頁
                         }, 5000);
+                        // 注意：這裡是逾期流程，不解鎖 isScanning，等待頁面跳轉
                         return;
                     }
 
@@ -534,6 +548,11 @@
                 console.error(e);
                 statusText.textContent = '系統錯誤，請稍後再試';
                 statusText.style.color = 'red';
+            } finally {
+                // 只有在沒有成功掃描到書籍的情況下（或者出錯），才解除鎖定
+                // 如果成功了，因為限制只能一本，保持鎖定也無妨，但為了邏輯正確性，
+                // 我們可以解除鎖定，由上方的 scannedBooks.length 檢查來阻擋後續輸入
+                isScanning = false;
             }
         }
 
@@ -590,11 +609,11 @@
             // 另外保留對隱藏輸入框的回退監聽（若真的需要）
             const barcodeInput = document.getElementById('barcode-input');
             if (barcodeInput) {
-                // 聚焦時允許輸入，方便測試
+                /* 移除自動移除 readonly 的邏輯，確保鍵盤不彈出
                 barcodeInput.addEventListener('focus', () => {
-                    // 移除 readonly 屬性（如果在 HTML 中被設定了）
                     barcodeInput.removeAttribute('readonly');
                 });
+                */
                 
                 barcodeInput.addEventListener('keypress', function(e) {
                     if (e.key === 'Enter') {
@@ -619,16 +638,16 @@
             });
         }
 
-        // 保持焦點在隱藏輸入框 (當在掃描頁面時)
-        document.addEventListener('click', function() {
-            if (document.getElementById('step-scan').classList.contains('active')) {
-                document.getElementById('barcode-input').focus();
-            }
-            if (document.getElementById('step-scan-attachment') && document.getElementById('step-scan-attachment').classList.contains('active')) {
-                const input = document.getElementById('attachment-barcode-input');
-                if(input) input.focus();
-            }
-        });
+        // 保持焦點在隱藏輸入框 (當在掃描頁面時) -> 已移除強制 focus 以避免虛擬鍵盤
+        // document.addEventListener('click', function() {
+        //     if (document.getElementById('step-scan').classList.contains('active')) {
+        //         document.getElementById('barcode-input').focus();
+        //     }
+        //     if (document.getElementById('step-scan-attachment') && document.getElementById('step-scan-attachment').classList.contains('active')) {
+        //         const input = document.getElementById('attachment-barcode-input');
+        //         if(input) input.focus();
+        //     }
+        // });
 
         // 更新確認頁面的列表
         function updateBookList() {
@@ -731,22 +750,22 @@
             await cancelReturn(btn);
         }
 
-        // 取消還書：直接執行 wake_and_home (包含關門與歸零)，確保機器回到 Ready (State 2)
+        // 取消還書：使用新的 cancel API，不需要執行 home
         async function cancelReturn(btn) {
             if (btn) btn.disabled = true;
-            showLoading('請勿將手伸入還書箱，以免受傷...');
+            showLoading('正在取消還書...');
             try {
-                // 直接執行 wake_and_home，此指令會讓機器執行 homing (通常包含關門)
-                // 避免先執行 close 導致機器停留在 State 4 而無法順利 homing 或造成流程冗餘
+                // 使用新的 cancel API
                 try {
-                    const wakeRes = await fetch('/api/hardware/wake_and_home', { method: 'POST' });
-                    const wakeJson = await wakeRes.json().catch(()=>null);
-                    if (!wakeRes.ok || (wakeJson && wakeJson.success === false)) {
-                         throw new Error((wakeJson && wakeJson.message) || 'wake_and_home failed');
+                    const cancelRes = await fetch('/api/cancel', { method: 'POST' });
+                    const cancelJson = await cancelRes.json().catch(() => null);
+                    if (!cancelRes.ok || (cancelJson && cancelJson.success === false)) {
+                        throw new Error((cancelJson && cancelJson.message) || 'cancel failed');
                     }
+                    console.log('Cancel API successful:', cancelJson);
                 } catch (e) {
-                    console.warn('wake_and_home failed', e);
-                    alert('機器復歸失敗，請聯絡管理員確認機器狀態。');
+                    console.warn('cancel API failed', e);
+                    alert('取消指令發送失敗，請聯絡管理員確認機器狀態。');
                 }
     
                 // 立即重置前端狀態
@@ -1056,8 +1075,8 @@
             document.addEventListener('keypress', tryWake);
         })();
 
-        // 每 5 秒檢查一次
-        setInterval(checkSystemStatus, 5000);
+        // 每 15 秒檢查一次
+        setInterval(checkSystemStatus, 15000);
     </script>
 </body>
 </html>

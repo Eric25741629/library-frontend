@@ -5,6 +5,7 @@ import threading
 import logging
 
 import shared
+import config
 
 api_bp = Blueprint('api', __name__)
 logger = logging.getLogger('api')
@@ -117,12 +118,17 @@ def scan_book():
 
     # 1. 查詢 SIP2 圖書館系統
     if not shared.sip2:
+        logger.error("SIP2 client is not initialized")
         return jsonify({"success": False, "message": "圖書館系統未連接"}), 500
         
+    logger.info(f"Querying book with ID: {book_id}")
     book_info = shared.sip2.get_book_info(book_id)
 
     if not book_info:
+        logger.warning(f"No book found for ID: {book_id}")
         return jsonify({"success": False, "message": f"找不到書籍編號: {book_id}"}), 404
+
+    logger.info(f"Found book: {book_info.get('title', 'Unknown')} by {book_info.get('author', 'Unknown')}")
 
     image_url = f"https://picsum.photos/seed/{book_id}/100/150"
 
@@ -273,10 +279,21 @@ def return_book():
         for b_id in book_ids:
             checkin_success = True
             if not attachment_only:
-                 if shared.sip2:
+                # 檢查是否啟用真實還書功能
+                config.reload_config()  # 重新載入配置
+                if config.LIBRARY_CHECKIN_ENABLED and shared.sip2:
+                    logger.info(f"Executing real checkin for book: {b_id}")
                     checkin_success = shared.sip2.checkin_book(b_id)
-                 else:
-                    checkin_success = False # No SIP2 connection
+                    if checkin_success:
+                        logger.info(f"Real checkin successful for book: {b_id}")
+                    else:
+                        logger.warning(f"Real checkin failed for book: {b_id}")
+                elif shared.sip2:
+                    logger.info(f"Real checkin disabled - simulating checkin for book: {b_id}")
+                    checkin_success = True  # 模擬成功
+                else:
+                    logger.warning(f"No SIP2 connection available for book: {b_id}")
+                    checkin_success = False
 
             if checkin_success:
                 book_info = shared.sip2.get_book_info(b_id) if shared.sip2 else None
@@ -312,3 +329,35 @@ def return_book():
         "message": f"成功歸還 {len(returned_books)} 本書籍",
         "data": returned_books
     })
+
+@api_bp.route('/cancel', methods=['POST'])
+def cancel_return():
+    """取消還書 API - 直接發送 cancel 指令，不執行 home"""
+    try:
+        machine = shared.machine
+        if not machine:
+            return jsonify({"success": False, "message": "機器未連接"}), 500
+            
+        # 發送取消指令
+        resp = machine._send_command("cancel")
+        logger.info(f"Cancel command sent, response: {resp}")
+        
+        # 檢查回應是否包含 ack
+        success = "ack" in str(resp).lower()
+        
+        if success:
+            return jsonify({
+                "success": True, 
+                "message": "已發送取消指令",
+                "response": str(resp)
+            })
+        else:
+            return jsonify({
+                "success": True, 
+                "message": "取消指令已發送",
+                "response": str(resp)
+            })
+            
+    except Exception as e:
+        logger.error(f"Cancel return error: {e}")
+        return jsonify({"success": False, "message": "取消操作失敗", "detail": str(e)}), 500

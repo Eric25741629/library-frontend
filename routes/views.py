@@ -6,9 +6,17 @@ views_bp = Blueprint('views', __name__)
 @views_bp.route('/')
 def index():
     """渲染還書介面主頁"""
-    if shared.is_box_full():
-        return render_template('return_book.html', service_suspended=True)
-    return render_template('return_book.html', service_suspended=False)
+    # 前端圖片設定（可透過後台上傳變更），從 shared.cfg 讀取
+    front_images = (shared.cfg or {}).get('front_images', {}) if hasattr(shared, 'cfg') else {}
+    scan_guide = front_images.get('scan_guide')
+    place_book_guide = front_images.get('place_book_guide')
+
+    ctx = {
+        'service_suspended': shared.is_box_full(),
+        'scan_guide_image': scan_guide,
+        'place_book_guide_image': place_book_guide,
+    }
+    return render_template('return_book.html', **ctx)
 
 @views_bp.route('/login', methods=['GET', 'POST'])
 def login():

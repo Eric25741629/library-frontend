@@ -3,12 +3,18 @@ from datetime import datetime
 import json
 import yaml
 import logging
+from pathlib import Path
 
 import shared
 import config as global_config
 
 admin_api_bp = Blueprint('admin_api', __name__)
 logger = logging.getLogger('admin_api')
+
+# 上傳圖片儲存目錄（位於 static/uploads）
+STATIC_DIR = Path(__file__).resolve().parents[1] / 'static'
+UPLOAD_DIR = STATIC_DIR / 'uploads'
+UPLOAD_DIR.mkdir(exist_ok=True)
 
 @admin_api_bp.before_request
 def check_login():
@@ -213,6 +219,69 @@ def test_uart():
         logger.error(f"test_uart error: {e}")
         return jsonify({"success": False, "message": f"測試例外錯誤: {e}"}), 500
 
+@admin_api_bp.route('/disconnect_uart', methods=['POST'])
+def disconnect_uart():
+    """斷開機器 UART 連線"""
+    try:
+        if shared.machine.ser and shared.machine.ser.is_open:
+            shared.machine.ser.close()
+            logger.info("Admin action: Disconnected UART.")
+            return jsonify({"success": True, "message": "已斷開 UART 連線"})
+        else:
+            return jsonify({"success": True, "message": "UART 連線早已斷開"})
+    except Exception as e:
+        logger.error(f"disconnect_uart error: {e}")
+        return jsonify({"success": False, "message": f"斷線失敗: {e}"}), 500
+
+@admin_api_bp.route('/reconnect_uart', methods=['POST'])
+def reconnect_uart():
+    """重新連接機器 UART 並執行初始化流程 (Wake up -> Homing)"""
+    try:
+        # 讀取目前設定 (以確保使用最新設定)
+        port = shared.machine.port
+        baud = shared.machine.baudrate
+        
+        # 1. 強制斷線 (如果還連著)
+        if shared.machine.ser and shared.machine.ser.is_open:
+            try:
+                shared.machine.ser.close()
+            except Exception:
+                pass
+        
+        # 2. 銷毀並重新建立 MachineController 實例
+        # 這是最徹底的重置方式，確保所有狀態（包括線程鎖、內部旗標、計時器等）都回到初始狀態
+        try:
+            old_machine = shared.machine
+            # 嘗試釋放舊資源
+            if old_machine:
+                try:
+                    if old_machine.ser and old_machine.ser.is_open:
+                         old_machine.ser.close()
+                except: pass
+            
+            # 重新初始化 MachineController
+            shared.init_machine_controller()
+            logger.info("MachineController re-initialized.")
+            
+            # 3. 觸發初始化流程 (init_machine)
+            # 由於這是全新的實例，直接呼叫 init_machine 即可
+            # 為了避免阻塞 API 回應，我們在這裡同步執行一次初始化，或選擇性地丟到背景
+            # 根據使用者需求「觸發一開始執行的流程」，我們這裡同步執行 init_machine
+            
+            init_result = shared.machine.init_machine()
+            
+            if init_result:
+                 return jsonify({"success": True, "message": f"已完全重啟機器控制器並初始化完成 ({port}, {baud})"})
+            else:
+                 return jsonify({"success": True, "message": f"已重啟控制器，但初始化流程可能未完全成功 ({port}, {baud})"})
+
+        except Exception as e:
+            logger.error(f"Failed to recreate MachineController: {e}")
+            return jsonify({"success": False, "message": f"控制器重啟失敗: {e}"})
+    except Exception as e:
+        logger.error(f"reconnect_uart error: {e}")
+        return jsonify({"success": False, "message": f"重連失敗: {e}"}), 500
+
 @admin_api_bp.route('/set_uart', methods=['POST'])
 def set_uart():
     """設定機器 UART"""
@@ -319,6 +388,95 @@ def set_library_config():
     except Exception as e:
         logger.error(f"set_library_config error: {e}")
         return jsonify({"success": False, "message": f"設定失敗: {e}"}), 500
+
+
+@admin_api_bp.route('/get_front_images', methods=['GET'])
+def get_front_images():
+    """取得前台掃描/放書示意圖的目前設定路徑"""
+    try:
+        if shared.CONFIG_FILE.exists():
+            current_conf = yaml.safe_load(shared.CONFIG_FILE.read_text(encoding='utf-8')) or {}
+        else:
+            current_conf = {}
+
+        front_images = current_conf.get('front_images', {}) or {}
+        return jsonify({
+            "success": True,
+            "images": {
+                "scan_guide": front_images.get('scan_guide', ''),
+                "place_book_guide": front_images.get('place_book_guide', ''),
+            }
+        })
+    except Exception as e:
+        logger.error(f"get_front_images error: {e}")
+        return jsonify({"success": False, "message": "讀取設定失敗"}), 500
+
+
+@admin_api_bp.route('/upload_front_images', methods=['POST'])
+def upload_front_images():
+    """上傳/更新前台掃描區與放書示意圖
+
+    接受 multipart/form-data：
+      - scan_guide: 檔案 (選填)
+      - place_book_guide: 檔案 (選填)
+    儲存於 static/uploads，並在 config.yml 的 front_images 中寫入相對路徑
+    （例如 uploads/scan_guide.png），前端再透過 url_for('static', filename=...) 存取。
+    """
+    try:
+        # 讀取現有設定
+        if shared.CONFIG_FILE.exists():
+            current_conf = yaml.safe_load(shared.CONFIG_FILE.read_text(encoding='utf-8')) or {}
+        else:
+            current_conf = {}
+
+        front_images = current_conf.get('front_images', {}) or {}
+
+        def save_image(field_name, default_basename):
+            file = request.files.get(field_name)
+            if not file or not file.filename:
+                return None
+
+            # 只允許基本安全的副檔名
+            suffix = Path(file.filename).suffix.lower()
+            if suffix not in {'.png', '.jpg', '.jpeg', '.gif'}:
+                raise ValueError(f"不支援的檔案格式: {suffix}")
+
+            safe_name = f"{default_basename}{suffix}"
+            dest_path = UPLOAD_DIR / safe_name
+            file.save(dest_path)
+
+            # 回傳給 config 使用 static 下的相對路徑
+            return f"uploads/{safe_name}"
+
+        try:
+            new_scan_path = save_image('scan_guide', 'scan_guide')
+            if new_scan_path:
+                front_images['scan_guide'] = new_scan_path
+        except ValueError as ve:
+            return jsonify({"success": False, "message": str(ve)}), 400
+
+        try:
+            new_place_path = save_image('place_book_guide', 'place_book_guide')
+            if new_place_path:
+                front_images['place_book_guide'] = new_place_path
+        except ValueError as ve:
+            return jsonify({"success": False, "message": str(ve)}), 400
+
+        current_conf['front_images'] = front_images
+        shared.CONFIG_FILE.write_text(yaml.dump(current_conf, allow_unicode=True), encoding='utf-8')
+
+        # 重新載入全域設定，確保 shared.cfg 內也能看到
+        global_config.reload_config()
+        shared.load_config()
+
+        return jsonify({
+            "success": True,
+            "message": "前台圖片已更新",
+            "images": front_images,
+        })
+    except Exception as e:
+        logger.error(f"upload_front_images error: {e}")
+        return jsonify({"success": False, "message": "圖片上傳或儲存失敗"}), 500
 
 @admin_api_bp.route('/test_library_conn', methods=['POST'])
 def test_library_conn():

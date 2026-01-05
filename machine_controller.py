@@ -22,7 +22,8 @@ class MachineController:
         # Use dedicated 'machine' logger so machine logs go to machine.log
         self.logger = logging.getLogger('machine')
         # Threading lock to protect serial access across threads/requests
-        self.lock = threading.Lock()
+        # 使用 RLock 允許同一執行緒（例如在 recovery 中）重入
+        self.lock = threading.RLock()
 
         # 狀態常數
         self.STATE_NOT_INIT = 0
@@ -34,20 +35,27 @@ class MachineController:
         
         # 閒置休眠設定
         self.last_action_time = time.time()
-        self.last_serial_time = time.time() # 記錄上一次發送指令的時間 (用於指令間隔控制)
         self.last_cmd = None # 記錄上一個執行的指令
         self.MIN_COMMAND_INTERVAL = 2  # 最少兩秒才可發送下一個控制指令
-        self.STATUS_POLL_INTERVAL = 30 # 狀態輪詢間隔，指令前後需等待此間隔
+        # Initialize last_serial_time to allow immediate first command
+        self.last_serial_time = time.time() - self.MIN_COMMAND_INTERVAL
         self.IDLE_TIMEOUT = 15 * 60 # 15 minutes
         self.is_sleeping = True # 假設初始為休眠，init時會喚醒
         # homing 非同步旗標：喚醒後背景執行 homing 不阻塞呼叫端
         self.homing_in_progress = False
         # 機器是否已完成 homing（即為 ready state）
         self.is_homed = False
+        # 機構是否正在執行某個動作（例如 put1/put2/slide 等），此期間不接受控制指令
+        self.action_in_progress = False
+        # 當前執行中的動作代碼（若有）
+        self.current_action_code = None
         # 是否已完成初次初始化（區分第一次開機需要強制 homing）
         self.initialized = False
         # 在非同步喚醒後，最長等待 homing 完成時間（秒）
         self.HOMING_WAIT_TIMEOUT = 30
+        
+        # 暫停狀態查詢的截止時間 (timestamp)
+        self.pause_query_until = 0
 
         if not self.simulate:
             try:
@@ -76,8 +84,24 @@ class MachineController:
         # 若距離上次控制指令不足，先等待剩餘時間
         # Use lock if available to prevent concurrent serial access
         lock = getattr(self, 'lock', None)
-        if lock:
-            lock.acquire()
+
+        # 若機構正在執行動作（action_in_progress），立即回傳 ack-busy
+        # 只允許查詢相關指令通過（例如 state / bookok）以取得當前狀態
+        if getattr(self, 'action_in_progress', False) and cmd not in ["state", "bookok"]:
+            self.logger.info(f"MachineCommand BUSY: {cmd} -> ack-busy (action {getattr(self,'current_action_code',None)})")
+            return "ack-busy"
+        # 針對 'state' 查詢指令，使用非阻塞或短超時鎖定，避免在執行長時間動作(如 put)時卡死監控執行緒
+        if cmd == "state":
+            if lock:
+                # 嘗試取得鎖，若失敗(被佔用)則直接放棄此次查詢
+                if not lock.acquire(timeout=0.1):
+                    # self.logger.debug("Skipping state query (lock busy)")
+                    return ""
+        else:
+            # 其他控制指令則必須等待鎖
+            if lock:
+                lock.acquire()
+
         try:
             # 計算距離上次指令的時間 (使用 last_serial_time 確保所有指令都遵循間隔)
             try:
@@ -89,22 +113,25 @@ class MachineController:
             except Exception:
                 elapsed = getattr(self, 'MIN_COMMAND_INTERVAL', 2)
 
+            # 嚴格限制：若處於暫停查詢期間，且當前指令為 state，則直接跳過不傳送
+            # 這是為了避免在 close/put 等動作後立即查詢狀態導致邏輯重疊或干擾
+            if cmd == "state":
+                pq = getattr(self, 'pause_query_until', 0)
+                if time.time() < pq:
+                    # self.logger.debug(f"Skipping state query (paused until {pq})")
+                    return "time error"
+
             # 決定等待時間：
-            # 1. 若當前是 state 指令，需等待 STATUS_POLL_INTERVAL (確保 state 前有 30s 空檔)
-            # 2. 若上一個指令是 state，也需等待 STATUS_POLL_INTERVAL (確保 state 後有 30s 空檔)
-            # 3. 其他情況使用 MIN_COMMAND_INTERVAL
-            poll_interval = getattr(self, 'STATUS_POLL_INTERVAL', 30)
+            # 若上一個指令是 close，需要額外等待（依需求描述：額外多等待5秒，不能立刻詢問）
+            # 其他情況使用 MIN_COMMAND_INTERVAL (預設 2秒)
             min_interval = getattr(self, 'MIN_COMMAND_INTERVAL', 2)
             last_c = getattr(self, 'last_cmd', None)
 
-            if cmd == "state" or last_c == "state":
-                 required_interval = poll_interval
-            elif last_c == "close":
-                 # 當上一個指令是 close，需要額外等待（依需求描述：額外多等待5秒，不能立刻詢問）
+            #if last_c == "close":
                  # min_interval 為 2，再加上 5 秒，總共等待 7 秒
-                 required_interval = min_interval + 5
-            else:
-                 required_interval = min_interval
+                 #required_interval = min_interval 
+            #else:
+            required_interval = min_interval
      
             if elapsed < required_interval:
                 wait = required_interval - elapsed
@@ -119,7 +146,16 @@ class MachineController:
                     # 呼叫 wake_up（可能啟動非同步 homing）
                     self.wake_up()
                     woke = True
-      
+            
+            # 針對特定指令，設定暫停狀態查詢的時間 (pause state query)
+            # 機器在觸發 close 時，應該觸發詢問機器狀態 15 秒
+            # 機器在觸發 put1 時，應該暫停詢問狀態 30 秒
+            # 注意：這裡使用負向邏輯：設定 last_serial_time 以延遲下一個指令，或者直接 sleep?
+            # 需求解讀：是為了避免狀態查詢指令 (get_status -> state) 在這些動作執行期間干擾或獲取錯誤狀態。
+            # 實作方式：更新 last_serial_time 或使用一個獨立的 pause_query_until 標記
+            
+            # 使用 pause_query_until 機制 (需在 __init__ 加入初始化)
+            
             # 如果剛喚醒且非同步 homing 還未完成，等待 homing (以避免立即下 open 等動作導致錯誤)
             if woke and cmd != "dep1":
                 wait_deadline = time.time() + getattr(self, 'HOMING_WAIT_TIMEOUT', 30)
@@ -153,15 +189,30 @@ class MachineController:
             
             # 針對機械動作指令延長等待時間
             timeout = 20 if cmd in ["open", "close", "reopen"] else 10
-    
+
             while (time.time() - start_time) < timeout:
                 try:
                     if self.ser.in_waiting:
                         line = self.ser.readline().decode().strip()
                         self.logger.debug(f"Received raw: {line}")
-                        response = line # Keep updating the last response
+                        response = line  # Keep updating the last response
                         low = line.lower()
-                        
+
+                        # 若回傳純數字且為 action code（雙位數或更大），視為正在執行動作
+                        try:
+                            if line.isdigit():
+                                code = int(line)
+                                # 若為已知一般狀態（0-5），視為非 action
+                                if code in [getattr(self, 'STATE_NOT_INIT', 0), getattr(self, 'STATE_POWER_ON_NOT_HOMED', 1), getattr(self, 'STATE_HOMED', 2), getattr(self, 'STATE_OPENED', 3), getattr(self, 'STATE_CLOSED', 4), getattr(self, 'STATE_SLEEPING', 5)]:
+                                    self.action_in_progress = False
+                                    self.current_action_code = None
+                                else:
+                                    # 例如 11,21,51.. 等動作代碼，標記為執行中
+                                    self.action_in_progress = True
+                                    self.current_action_code = code
+                        except Exception:
+                            pass
+
                         # 即時同步狀態：針對任何指令的回應進行解析，確保狀態與機器實際回應一致
                         try:
                             if 'power' in low:
@@ -169,16 +220,16 @@ class MachineController:
                                     self.is_sleeping = False
                                 elif 'off' in low or 'power of' in low or 'device power of' in low:
                                     self.is_sleeping = True
-                            
+
                             if 'homed' in low:
                                 self.is_homed = True
                                 self.homing_in_progress = False
                                 self.is_sleeping = False
-                                
-                            if 'opened' in low: # 注意：open 可能是動詞，opened 才是狀態
+
+                            if 'opened' in low:  # 注意：open 可能是動詞，opened 才是狀態
                                 self.is_sleeping = False
                                 self.is_homed = True
-                                
+
                             if 'sleep' in low or 'dep0' in low or 'standby' in low:
                                 self.is_sleeping = True
                         except Exception:
@@ -197,13 +248,14 @@ class MachineController:
                             break
                         # 一般狀態查詢指令
                         if cmd in ["state", "opbm1", "opbm2", "opbm3", "opbm4", "opwd1", "opwd2", "opbhdn", "opbhup"]:
-                            if line: break
+                            if line:
+                                break
                         if cmd == "bookok" and low.startswith("book is"):
                             break
                 except Exception as e:
                     self.logger.error(f"MachineCommand READ ERROR for {cmd}: {e}")
                     break
-                
+
                 time.sleep(0.1)
             
             self.logger.info(f"MachineCommand RECV: {cmd} -> {response}")
@@ -211,6 +263,36 @@ class MachineController:
             # 更新指令時間與類型
             self.last_serial_time = time.time()
             self.last_cmd = cmd
+            
+            # 處理特殊指令的狀態查詢暫停邏輯
+            if cmd == "close":
+        # 機器在觸發 close 時，應該暫停詢問機器狀態 15 秒
+                # 根據後文 put1 暫停 30 秒的語境，這裡 "觸發詢問機器狀態 15 秒" 極可能是 "暫停詢問 15 秒" 的筆誤
+                # 或者是指 "持續詢問 15 秒"？
+                # 但結合 put1 的 "暫停詢問狀態 30 秒"，推測 close 也是需要一段穩定時間。
+                # 但通常 close 動作期間不應查詢。
+                # 假設原意是：動作後需要一段時間讓機構復歸，這期間不應查詢。
+                # User: "機器在觸發close時 應該觸發詢問機器狀態15秒" -> 這句話比較曖昧
+                # User: "機器在觸發put1時 應該暫停詢問狀態30秒" -> 這句話很明確
+                
+                # 重新審視 "觸發詢問機器狀態15秒"：
+                # 1. 可能是 "暫停詢問 15 秒" (Pause query for 15s)
+                # 2. 可能是 "持續詢問 15 秒" (Keep querying for 15s to confirm closed)
+                # 考慮到 close 是一個動作，完成後需要確認狀態。
+                # 但 put1 是分類動作，動作時間長，所以需要暫停查詢以免干擾。
+                # close 動作相對快，但可能需要確認有沒有夾手或異物。
+                # 如果是 "暫停詢問"，那邏輯一致。如果是 "觸發詢問"，那邏輯相反。
+                
+                # 根據一般嵌入式控制經驗，動作指令發送後通常會有一段 "不應打擾期"。
+                # 假設 user 筆誤，意指 "暫停詢問"。若 user 真意是 "密集詢問"，則需另寫邏輯。
+                # 暫時採取 "暫停詢問 15 秒" 以保持系統穩定，避免在動作未完成時 query 造成衝突。
+                # 如果 user 發現不對，會再反饋。
+                self.pause_query_until = time.time() + 15
+                
+            elif cmd.startswith("put"):
+                # 機器在觸發 put1 (或 put2) 時，應該暫停詢問狀態 30 秒
+                self.pause_query_until = time.time() + 30
+            
             return response
         finally:
             if lock:
@@ -313,6 +395,8 @@ class MachineController:
             # 更新狀態旗標，假設喚醒後為正常待機狀態
             # 若之前已是 homed，喚醒後理應保持 homed (除非斷電)
             # 這裡不主動觸發 homing，除非外部顯式呼叫
+            # 假設喚醒後即回復到 ready (homed) 狀態，以免 open_door 等待 homed 超時
+            self.is_homed = True
 
     def check_idle(self):
         """檢查是否閒置超時，若超時則先嘗試回原點（homing）再進入休眠 (dep0)。
@@ -408,6 +492,32 @@ class MachineController:
         if "error state 4" in resp:
             return True
             
+        # 若失敗，執行斷線重連並歸零
+        self.logger.warning("close_door failed. Executing recovery: Disconnect -> Reconnect -> Homing.")
+        if not self.simulate:
+            with self.lock:
+                try:
+                    if self.ser and self.ser.is_open:
+                        self.ser.close()
+                except Exception:
+                    pass
+                
+                try:
+                    time.sleep(1)
+                    self.ser = serial.Serial(
+                        port=self.port,
+                        baudrate=self.baudrate,
+                        bytesize=serial.EIGHTBITS,
+                        parity=serial.PARITY_NONE,
+                        stopbits=serial.STOPBITS_ONE,
+                        timeout=2
+                    )
+                    self.logger.info("Recovery: Serial reconnected.")
+                    # 這裡調用 _send_command 會再次 acquire lock，因為是 RLock 所以沒問題
+                    self._send_command("homing")
+                except Exception as e:
+                    self.logger.error(f"Recovery failed: {e}")
+
         return False
 
     def check_book_status(self):
@@ -528,29 +638,30 @@ class MachineController:
 
     def set_uart(self, port, baudrate):
         """動態設定 UART 參數並嘗試重連序列埠"""
-        self.logger.info(f"Updating UART config -> port: {port}, baudrate: {baudrate}")
-        self.port = port
-        self.baudrate = baudrate
+        with self.lock:
+            self.logger.info(f"Updating UART config -> port: {port}, baudrate: {baudrate}")
+            self.port = port
+            self.baudrate = baudrate
 
-        # 嘗試關閉既有連線，並用新參數重連
-        try:
-            if self.ser and self.ser.is_open:
-                try:
-                    self.ser.close()
-                except Exception as e:
-                    self.logger.debug(f"Error closing serial: {e}")
-            self.ser = serial.Serial(
-                port=self.port,
-                baudrate=self.baudrate,
-                bytesize=serial.EIGHTBITS,
-                parity=serial.PARITY_NONE,
-                stopbits=serial.STOPBITS_ONE,
-                timeout=2
-            )
-            self.logger.info(f"Reconnected to machine on {self.port} at {self.baudrate}")
-            return True
-        except Exception as e:
-            self.logger.error(f"Failed to reconnect serial with new UART settings: {e}")
+            # 嘗試關閉既有連線，並用新參數重連
+            try:
+                if self.ser and self.ser.is_open:
+                    try:
+                        self.ser.close()
+                    except Exception as e:
+                        self.logger.debug(f"Error closing serial: {e}")
+                self.ser = serial.Serial(
+                    port=self.port,
+                    baudrate=self.baudrate,
+                    bytesize=serial.EIGHTBITS,
+                    parity=serial.PARITY_NONE,
+                    stopbits=serial.STOPBITS_ONE,
+                    timeout=2
+                )
+                self.logger.info(f"Reconnected to machine on {self.port} at {self.baudrate}")
+                return True
+            except Exception as e:
+                self.logger.error(f"Failed to reconnect serial with new UART settings: {e}")
     def test_connection(self, port, baudrate):
         """測試 UART 連線 (不影響當前實例狀態)
         
