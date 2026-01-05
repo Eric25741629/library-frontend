@@ -122,7 +122,10 @@ class SIP2Client:
                 "status": "Unknown",
                 "due_date": None,
                 "patron_name": None,
-                "has_attachment": False # Default to False
+                "has_attachment": False,  # Default to False
+                "attachment_desc": None,
+                "error": False,
+                "error_message": None,
             }
             
             # 解析回應的固定長度欄位
@@ -161,12 +164,46 @@ class SIP2Client:
                     # AE 在這個系統中是 ISBN
                     isbn = part[2:]
                     self.logger.debug(f"Found ISBN: {isbn}")
-                elif part.startswith('CH'): 
+                elif part.startswith('CH'):
                     # CH 欄位可能包含索書號等資訊
                     ch_content = part[2:]
                     self.logger.debug(f"Found CH field: {ch_content}")
-                # Example field for attachment - adjust based on actual SIP2 field (e.g. BQ or CK)
-                # elif part.startswith('BQ'): data['has_attachment'] = 'attachment' in part[2:].lower()
+                elif part.startswith('AF') or part.startswith('AG'):
+                    # AF/AG 在某些 SIP2 回應中有時為錯誤訊息，但也可能只是額外欄位 (例如再次回傳 barcode 或索書號)
+                    # 只在明確包含錯誤關鍵字時，才視為錯誤；否則把內容保留為一般欄位
+                    msg = part[2:].strip()
+                    if msg:
+                        low = msg.lower()
+                        error_keywords = ['錯誤', 'error', 'invalid', 'not found', 'failed', 'not present', 'not available', '不存在']
+                        is_error = any(kw in low for kw in error_keywords)
+                        if is_error:
+                            data['error'] = True
+                            if not data.get('error_message'):
+                                data['error_message'] = msg
+                            else:
+                                data['error_message'] += ('; ' + msg)
+                            self.logger.debug(f"Found error/info field ({part[:2]}): {msg}")
+                        else:
+                            # 非錯誤訊息：保留到 af/ag 欄位以便日後使用
+                            if part.startswith('AF'):
+                                data['af'] = msg
+                            else:
+                                data['ag'] = msg
+                            self.logger.debug(f"Found AF/AG non-error field ({part[:2]}): {msg}")
+                elif part.startswith('AQ'):
+                    # AQ 欄位：附件說明，例如「1張光碟片」
+                    attach = part[2:].strip()
+                    if attach:
+                        data['has_attachment'] = True
+                        data['attachment_desc'] = attach
+                        self.logger.debug(f"Found attachment info (AQ): {attach}")
+
+            # If there was an error message from AF/AG, return an error-style dict
+            if data.get('error'):
+                return {
+                    'error': True,
+                    'message': data.get('error_message')
+                }
             
             self.logger.info(f"Successfully parsed book info: {data['title']} by {data['author']}")
             return data
