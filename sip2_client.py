@@ -216,17 +216,42 @@ class SIP2Client:
         # 09<No block><Date><Return Date><Current Location><Institution Id><Item Identifier><Terminal Password>...
         now = datetime.datetime.now().strftime("%Y%m%d    %H%M%S")
         inst = self.institution_id or 'MAIN'
-        # AP (Current Location) 通常也是 Institution Id 或特定 Location Id，這裡暫時使用空或 inst
-        msg = f"09N{now}{now}AP{inst}|AO{inst}|AB{barcode}|"
+        # AP (Current Location) 使用 config 指定的還書地點（例如 LB），若未設定則退回 inst
+        current_loc = getattr(self, 'current_location', None) or inst
+        msg = f"09N{now}{now}AP{current_loc}|AO{inst}|AB{barcode}|"
         
         resp = self._send_message(msg)
-        if not resp: return False
+        if not resp: 
+            self.logger.error(f"No response from SIP2 server for checkin: {barcode}")
+            return False
 
         # 10 Checkin Response
-        # 10<Ok><Resensitize>...
-        if resp.startswith('101'): # 1 is Ok
+        # 格式：10<ok><resensitize><magnetic media><alert><date>...
+        # ok 標誌在第 3 位（索引 2）：'1' = 成功，'0' = 失敗
+        if not resp.startswith('10'):
+            self.logger.error(f"Unexpected checkin response format: {resp[:20]}...")
+            return False
+        
+        if len(resp) < 3:
+            self.logger.error(f"Checkin response too short: {resp}")
+            return False
+        
+        ok_flag = resp[2]
+        if ok_flag == '1':
+            self.logger.info(f"Checkin successful for {barcode}")
             return True
-        return False
+        else:
+            # 解析錯誤訊息（AF/AG 欄位）
+            error_msg = "未知錯誤"
+            parts = resp.split('|')
+            for part in parts:
+                if part.startswith('AF') or part.startswith('AG'):
+                    msg = part[2:].strip()
+                    if msg:
+                        error_msg = msg
+                        break
+            self.logger.warning(f"Checkin failed for {barcode}: {error_msg}")
+            return False
 
     def health_check(self):
         # 用 99 SC Status 做健康檢查

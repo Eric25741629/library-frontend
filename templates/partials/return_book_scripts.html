@@ -377,7 +377,8 @@
                 const response = await fetch('/api/return', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ book_ids: bookIds })
+                    // 一併把掃描到的完整書籍資訊送給後端，避免後端再額外發 SIP2 17 查詢
+                    body: JSON.stringify({ book_ids: bookIds, books: scannedBooks })
                 });
                 const result = await response.json();
     
@@ -400,6 +401,22 @@
                         hideLoading();
                         
                         // 停留在原步驟，不跳轉，讓使用者可以再次點擊「完成投入」
+                    } else if (result.code === 'CHECKIN_FAILED') {
+                        // 圖書館系統拒絕本次還書（例如分館 IP 有異），此時門已重新開啟
+                        // 引導使用者先將書本取回，再按「關閉還書箱」按鈕
+                        alert((result.message || '圖書館系統拒絕本次還書') + '\n\n請先將書本取回，確認沒有任何書在還書口內，再按「關閉還書箱」。');
+
+                        // 清空目前掃描列表，避免誤以為已記錄
+                        scannedBooks = [];
+                        currentProcessingBook = null;
+                        updateBookList();
+
+                        // 將「完成投入」按鈕改為「關閉還書箱」並綁定新的流程
+                        const btnPlace = document.querySelector('#step-place-book .btn-primary');
+                        if (btnPlace) {
+                            btnPlace.onclick = confirmCloseAfterRetrieve;
+                            btnPlace.innerHTML = '<i class="fas fa-door-closed"></i> 確認已取回，關閉還書箱';
+                        }
                     } else {
                         alert(result.message || '還書失敗');
                     }
@@ -408,6 +425,43 @@
                 hideLoading();
                 console.error(e);
                 alert('系統錯誤');
+            } finally {
+                isHardwareProcessing = false;
+                if (btn) setTimeout(() => { try { btn.disabled = false } catch(e){} }, 500);
+            }
+        }
+
+        // 使用者取回書本後，按下「關閉還書箱」：
+        // - 再次確認機器內已沒有書本
+        // - 如果沒有書，再安全關門並回首頁
+        async function confirmCloseAfterRetrieve(btn) {
+            if (isHardwareProcessing) return;
+            isHardwareProcessing = true;
+
+            if (btn) btn.disabled = true;
+            showLoading('正在確認還書口內沒有書本，請稍候…', '關門中，請稍候');
+
+            try {
+                const res = await fetch('/api/hardware/close_empty', { method: 'POST' });
+                const result = await res.json().catch(() => ({}));
+
+                hideLoading();
+
+                if (res.ok && result.success) {
+                    // 確認無書且關門成功，回首頁
+                    alert(result.message || '還書箱已關閉，將回到首頁。');
+                    resetFlow();
+                } else {
+                    if (result.code === 'BOOK_STILL_DETECTED') {
+                        alert(result.message || '仍偵測到書籍在還書口內，請先取出書本。');
+                    } else {
+                        alert(result.message || '關閉還書箱失敗，請洽櫃台。');
+                    }
+                }
+            } catch (e) {
+                hideLoading();
+                console.error(e);
+                alert('系統錯誤，無法關閉還書箱，請洽櫃台。');
             } finally {
                 isHardwareProcessing = false;
                 if (btn) setTimeout(() => { try { btn.disabled = false } catch(e){} }, 500);
@@ -476,7 +530,10 @@
                 const response = await fetch('/api/return', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ book_ids: [currentProcessingBook.book_id] })
+                    body: JSON.stringify({
+                        book_ids: [currentProcessingBook.book_id],
+                        books: [currentProcessingBook]
+                    })
                 });
                 const result = await response.json();
                 

@@ -3,12 +3,21 @@ from datetime import datetime
 import time
 import threading
 import logging
+import asyncio
 
 import shared
 import config
 
 api_bp = Blueprint('api', __name__)
 logger = logging.getLogger('api')
+
+def _compute_target_bin(location: str) -> int:
+    """中文館藏使用 put1(=1)，其他使用 put2(=2)。"""
+    try:
+        text = (location or '').strip()
+        return 1 if ('中文' in text) else 2
+    except Exception:
+        return 2
 
 @api_bp.route('/status')
 def get_status():
@@ -17,14 +26,14 @@ def get_status():
     limit = shared.MAX_RETURN_LIMIT
 
     # 檢查圖書館通訊
+    # 改用 SIP2 99 SC Status 健康檢查，而不是一直送 17 Item Information
     library_ok = False
     try:
         if shared.sip2:
             try:
-                test_info = shared.sip2.get_book_info('ping_test')
+                library_ok = bool(shared.sip2.health_check())
             except Exception:
-                test_info = None
-            library_ok = test_info is not None
+                library_ok = False
         else:
             library_ok = False
     except Exception as e:
@@ -128,29 +137,41 @@ def scan_book():
         logger.warning(f"No book found for ID: {book_id}")
         return jsonify({"success": False, "message": f"找不到書籍編號: {book_id}"}), 404
 
+    # If SIP2 client returned an error dict (e.g., AF/AG message), handle it
+    if isinstance(book_info, dict) and book_info.get('error'):
+        msg = book_info.get('message') or '查詢失敗'
+        logger.warning(f"SIP2 reported error for {book_id}: {msg}")
+        return jsonify({"success": False, "message": msg}), 400
+
     logger.info(f"Found book: {book_info.get('title', 'Unknown')} by {book_info.get('author', 'Unknown')}")
 
     image_url = f"https://picsum.photos/seed/{book_id}/100/150"
 
-    # 3. 檢查是否逾期
+    # 2. 以 libwebpac_playwright 查詢到期日與館藏位置
+    due_date_str = None
+    location = None
+    try:
+        from libwebpac_playwright import fetch_due_and_location
+        due_date_str, location = asyncio.run(fetch_due_and_location(book_id, debug=False))
+    except Exception as e:
+        logger.warning(f"webpac due/location probe failed for {book_id}: {e}")
+        # fallback 使用 SIP2 的 due_date，如果有
+        due_date_str = book_info.get('due_date')
+        location = None
+
+    # 3. 檢查是否逾期（以 YYYY-MM-DD 格式判定；'在架' 視為未逾期）
     is_overdue = False
-    due_date_str = book_info.get('due_date')
-    if due_date_str:
-        try:
-            due_date = None
-            for fmt in ("%Y-%m-%d", "%Y%m%d", "%d/%m/%Y"):
-                try:
-                    due_date = datetime.strptime(due_date_str.strip(), fmt)
-                    break
-                except ValueError:
-                    continue
-            
-            if due_date:
+    if isinstance(due_date_str, str):
+        if due_date_str.strip() == '在架':
+            is_overdue = False
+        else:
+            try:
+                parsed = datetime.strptime(due_date_str.strip(), '%Y-%m-%d')
                 today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-                if due_date < today:
-                    is_overdue = True
-        except Exception as e:
-            logger.warning(f"Date parse error: {e}")
+                is_overdue = parsed < today
+            except Exception:
+                # 若無法解析則視為未知，不封鎖
+                is_overdue = False
 
     if is_overdue:
         return jsonify({
@@ -160,10 +181,13 @@ def scan_book():
             "data": {
                  "title": book_info['title'],
                  "due_date": due_date_str,
-                 "patron_name": book_info.get('patron_name', 'Unknown')
+                 "patron_name": book_info.get('patron_name', 'Unknown'),
+                 "location": location
             }
         }), 400
 
+    # 4. 成功回傳，並附上館藏位置與分櫃建議
+    target_bin = _compute_target_bin(location)
     return jsonify({
         "success": True,
         "message": "掃描成功",
@@ -174,8 +198,56 @@ def scan_book():
             "image_url": image_url,
             "due_date": due_date_str,
             "patron_name": book_info.get('patron_name'),
-            "has_attachment": book_info.get('has_attachment', False)
+            "has_attachment": book_info.get('has_attachment', False),
+            "attachment_desc": book_info.get('attachment_desc'),
+            "location": location,
+            "target_bin": target_bin
         }
+    })
+
+
+@api_bp.route('/check_due', methods=['POST'])
+def check_due():
+    """使用 libwebpac_playwright 查詢登錄號/條碼的到期日與館藏位置，並回傳是否逾期。"""
+    data = request.json or {}
+    acn = data.get('acn') or data.get('book_id')
+    if not acn:
+        return jsonify({"success": False, "message": "缺少 acn 或 book_id"}), 400
+
+    try:
+        # 延遲 import，避免在無需該功能時加載 heavy 依賴
+        from libwebpac_playwright import fetch_due_and_location
+    except Exception as e:
+        logger.error(f"Failed to import libwebpac_playwright: {e}")
+        return jsonify({"success": False, "message": "伺服器未啟用網頁查詢功能"}), 500
+
+    try:
+        # fetch_due_and_location 是 async，於同步環境使用 asyncio.run
+        due_date, location = asyncio.run(fetch_due_and_location(acn, debug=False))
+    except Exception as e:
+        logger.error(f"fetch_due_and_location failed for {acn}: {e}")
+        return jsonify({"success": False, "message": "查詢失敗，請稍後再試"}), 500
+
+    # 判定逾期：若 due_date 為 YYYY-MM-DD，與今日比較；若為 '在架' 或 None，視為未逾期/未知
+    is_overdue = None
+    normalized_due = due_date
+    if due_date:
+        if isinstance(due_date, str) and due_date == '在架':
+            is_overdue = False
+        else:
+            try:
+                parsed = datetime.strptime(due_date.strip(), '%Y-%m-%d')
+                today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+                is_overdue = parsed < today
+            except Exception:
+                is_overdue = None
+
+    return jsonify({
+        "success": True,
+        "acn": acn,
+        "due_date": normalized_due,
+        "location": location,
+        "is_overdue": is_overdue
     })
 
 @api_bp.route('/return', methods=['POST'])
@@ -185,6 +257,7 @@ def return_book():
         return jsonify({"success": False, "message": "還書箱已滿，暫停服務", "code": "SERVICE_SUSPENDED"}), 503
 
     data = request.json or {}
+    books_payload = data.get('books') or []  # [{book_id, location, target_bin}]
     book_ids = data.get('book_ids', [])
     attachment_only = data.get('attachment_only', False)
     attachment_barcode = data.get('attachment_barcode')
@@ -204,6 +277,8 @@ def return_book():
             return jsonify({"success": False, "message": "附件條碼與書籍不符，請重新掃描"}), 400
 
     returned_books = []
+    # 選擇分櫃（預設 1；若有提供 target_bin 則使用）
+    selected_bin = None
     current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     machine = shared.machine
     
@@ -276,6 +351,33 @@ def return_book():
     cursor = conn.cursor()
 
     try:
+        # 若前端提供 books，則以 books 中的第一本為準（流程限制一次一本）
+        if books_payload and isinstance(books_payload, list):
+            try:
+                first = books_payload[0]
+                b_id = first.get('book_id')
+                location = first.get('location')
+                selected_bin = int(first.get('target_bin') or _compute_target_bin(location))
+                book_ids = [b_id]
+            except Exception:
+                pass
+
+        # 若有多本書，建立一個方便查詢的 map（以 book_id 對應前端傳來的完整資訊）
+        books_map = {}
+        try:
+            for item in books_payload:
+                if not isinstance(item, dict):
+                    continue
+                key = (item.get('book_id') or item.get('barcode'))
+                if key:
+                    books_map[str(key).strip()] = item
+        except Exception:
+            books_map = {}
+
+        # 紀錄是否有還書失敗；若失敗則不做分類並重新開門，讓使用者取回書本洽詢櫃台
+        all_checkin_success = True
+        failed_books = []
+
         for b_id in book_ids:
             checkin_success = True
             if not attachment_only:
@@ -288,34 +390,109 @@ def return_book():
                         logger.info(f"Real checkin successful for book: {b_id}")
                     else:
                         logger.warning(f"Real checkin failed for book: {b_id}")
+                        all_checkin_success = False
+                        failed_books.append(b_id)
+                        break
                 elif shared.sip2:
                     logger.info(f"Real checkin disabled - simulating checkin for book: {b_id}")
                     checkin_success = True  # 模擬成功
                 else:
                     logger.warning(f"No SIP2 connection available for book: {b_id}")
                     checkin_success = False
+                    all_checkin_success = False
+                    failed_books.append(b_id)
+                    break
 
             if checkin_success:
-                book_info = shared.sip2.get_book_info(b_id) if shared.sip2 else None
-                title = book_info['title'] if book_info else 'Unknown'
+                # 優先使用前端在掃描步驟取得的書籍資料，避免在還書階段再次送出 17 Item Information
+                raw_key = str(b_id).strip() if b_id is not None else None
+                book_source = books_map.get(raw_key, {}) if raw_key else {}
+                
+                # 如果從 books_map 找不到，嘗試不同的 key 格式或從 SIP2 重新查詢
+                if not book_source or not book_source.get('title'):
+                    logger.warning(f"Book {b_id} not found in books_map, trying SIP2 query")
+                    try:
+                        if shared.sip2:
+                            book_info_fallback = shared.sip2.get_book_info(b_id)
+                            if book_info_fallback and not book_info_fallback.get('error'):
+                                book_source = book_info_fallback
+                    except Exception as e:
+                        logger.error(f"Fallback book info query failed for {b_id}: {e}")
+
+                title = book_source.get('title') or 'Unknown'
                 if attachment_only:
                     title += " (附件)"
-                
-                image_url = f"https://picsum.photos/seed/{b_id}/100/150"
 
-                cursor.execute('INSERT INTO box_inventory (book_id, title, image_url, return_time) VALUES (?, ?, ?, ?)',
-                               (b_id, title, image_url, current_time))
-                
+                # 前端若已提供 image_url 則沿用，否則使用預設隨機圖
+                image_url = book_source.get('image_url') or f"https://picsum.photos/seed/{b_id}/100/150"
+
+                # 若未提供 location，嘗試查詢（但不阻擋流程）
+                # 館藏地優先使用前端掃描時就取得的資料，若沒有再嘗試 webpac 查詢
+                location_val = None
+                try:
+                    location_val = book_source.get('location') if isinstance(book_source, dict) else None
+                    if not location_val:
+                        from libwebpac_playwright import fetch_due_and_location
+                        _, location_val = asyncio.run(fetch_due_and_location(b_id, debug=False))
+                except Exception:
+                    location_val = None
+
+                cursor.execute('INSERT INTO box_inventory (book_id, title, image_url, return_time, location) VALUES (?, ?, ?, ?, ?)',
+                               (b_id, title, image_url, current_time, location_val))
+
                 returned_books.append({
                     "book_id": b_id,
                     "title": title,
-                    "return_time": current_time
+                    "return_time": current_time,
+                    "location": location_val
                 })
+        # 若有任何一本書還書指令失敗，則：
+        # 1) 回滾本次交易，不記錄到本地 box_inventory
+        # 2) 重新開啟投書口，讓使用者取回書本
+        # 3) 回傳錯誤訊息，提醒使用者洽詢櫃台
+        if not all_checkin_success:
+            conn.rollback()
+            try:
+                logger.info(f"Checkin failed for books {failed_books}; reopening door to let user retrieve items.")
+
+                def async_reopen_after_checkin_error():
+                    try:
+                        time.sleep(0.1)
+                        machine.reopen_door()
+                    except Exception as e:
+                        logger.error(f"Reopen door after checkin error failed: {e}")
+
+                threading.Thread(target=async_reopen_after_checkin_error, daemon=True).start()
+            except Exception as e:
+                logger.error(f"Failed to schedule reopen after checkin error: {e}")
+
+            return jsonify({
+                "success": False,
+                "message": "圖書館系統拒絕本次還書，請取回書本並洽詢櫃台。",
+                "code": "CHECKIN_FAILED",
+                "failed_books": failed_books
+            }), 400
         
         conn.commit()
         
-        # 硬體分類 (預設放入箱子 1)
-        machine.sort_book(1)
+        # 硬體分類：若已選定分櫃則使用，否則預設為館藏位置推導
+        try:
+            # 若本次沒有任何成功的還書紀錄，則不啟動分類動作，避免書未成功入帳就被送入箱內
+            if not returned_books:
+                logger.warning("No books were successfully checked in; skipping sort_book.")
+                return jsonify({
+                    "success": False,
+                    "message": "沒有成功完成還書的書籍，請確認狀態或洽詢櫃台。",
+                    "data": []
+                }), 400
+
+            if selected_bin is None:
+                # 嘗試以最後一本的 location 決定
+                last_loc = (returned_books[-1] or {}).get('location') if returned_books else None
+                selected_bin = _compute_target_bin(last_loc)
+            machine.sort_book(int(selected_bin or 1))
+        except Exception as e:
+            logger.error(f"sort_book failed: {e}")
         
     except Exception as e:
         conn.rollback()

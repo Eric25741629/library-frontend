@@ -94,8 +94,46 @@
             </div>
 
             <div class="action-buttons-vertical">
-                <button class="btn-primary btn-block" onclick="goToPlaceBookStep(this)">
+                <button id="confirm-next-btn" class="btn-primary btn-block" onclick="goToPlaceBookStep(this)">
                     <i class="fas fa-arrow-right"></i> 下一步：投入還書箱
+                </button>
+                <button class="btn-secondary btn-block" style="margin-top:12px;" onclick="resetFlow(this)">
+                    <i class="fas fa-times"></i> 取消還書
+                </button>
+            </div>
+        </section>
+
+        <!-- Step 3.6: Attachment Prompt (moved to be right after confirmation) -->
+        <section id="step-attachment-prompt" class="step-section">
+            <h2 class="section-title">此書籍含有附件</h2>
+            <div class="place-book-instruction">
+                 <div class="place-book-anim-container">
+                    <div class="anim-book" style="color: #ffc107;">
+                        <i class="fas fa-compact-disc"></i>
+                    </div>
+                </div>
+                <p style="font-size: 1.4rem; color: #555; margin-bottom: 0.5rem;">
+                    此書籍在系統中標示「含有附件」。
+                </p>
+                <p style="font-size: 1.2rem; color: #333; margin-bottom: 1.2rem; font-weight: 500;">
+                    請選擇目前的狀況：
+                </p>
+                <p style="font-size: 1.05rem; color: #666; margin-bottom: 1.8rem;">
+                    若您<strong>有借附件</strong>，請選擇「我有借附件，現在一起還」，系統會先協助歸還書本本體，
+                    接著再引導您掃描附件條碼並投入附件。<br>
+                    若您<strong>沒有借附件</strong>，請選擇「我沒有借附件，現在還書」，僅歸還書本本體。
+                </p>
+            </div>
+            
+            <div class="action-buttons" style="flex-wrap: wrap; justify-content: center; gap: 12px;">
+                <button type="button" class="btn-primary btn-large" onclick="processBookWithAttachment(this)">
+                    <i class="fas fa-check"></i> 我有借附件，現在一起還
+                </button>
+                <button type="button" class="btn-secondary btn-large" onclick="skipAttachmentFlow(this)">
+                    <i class="fas fa-book"></i> 我沒有借附件，現在還書
+                </button>
+                <button type="button" class="btn-danger btn-large" onclick="resetFlow(this)">
+                    <i class="fas fa-times"></i> 取消還書
                 </button>
             </div>
         </section>
@@ -179,29 +217,7 @@
             </div>
         </section>
 
-        <!-- Step 3.6: Attachment Prompt -->
-        <section id="step-attachment-prompt" class="step-section">
-            <h2 class="section-title">此書籍含有附件</h2>
-            <div class="place-book-instruction">
-                 <div class="place-book-anim-container">
-                    <div class="anim-book" style="color: #ffc107;">
-                        <i class="fas fa-compact-disc"></i>
-                    </div>
-                </div>
-                <p style="font-size: 1.5rem; color: #555; margin-bottom: 1rem;">
-                    請先投入<strong style="color:#007bff;">書籍本體</strong>
-                </p>
-                <p style="font-size: 1.1rem; color: #666; margin-bottom: 2rem;">
-                    待機器閘門重新開啟後，再投入附件 (光碟/小冊子)
-                </p>
-            </div>
-            
-            <div class="action-buttons">
-                <button class="btn-primary btn-large" onclick="processBookWithAttachment(this)">
-                    <i class="fas fa-check"></i> 我知道了，先投入書籍
-                </button>
-            </div>
-        </section>
+        
 
         <!-- Step 3.65: Scan Attachment -->
         <section id="step-scan-attachment" class="step-section">
@@ -280,6 +296,16 @@
         </div>
     </div>
 
+    <!-- 臨時訊息彈窗（用於顯示條碼錯誤等重要提示） -->
+    <div id="temp-message-modal" class="suspended-overlay" style="display:none; align-items:center; justify-content:center; z-index:10002;">
+        <div class="suspended-content" style="max-width:760px; padding: 1.6rem; border-radius:12px; text-align:center; background:rgba(255,255,255,0.98); color:var(--text-dark);">
+            <h2 id="temp-message-title" style="color:var(--danger-red); margin-bottom:0.25rem;"><i class="fas fa-exclamation-circle"></i> 錯誤</h2>
+            <p id="temp-message-body" style="font-size:1.05rem; color:#333; margin-bottom:0.25rem;">發生錯誤</p>
+        </div>
+    </div>
+
+    <!-- 查詢中：改用既有 loading overlay 風格，由 JS 呼叫 showLoading/hideLoading 控制 -->
+
     <!-- Footer -->
     <footer class="main-footer">
         <div class="footer-left">
@@ -353,6 +379,34 @@
         }
         setInterval(updateTime, 1000);
         updateTime();
+
+        // 顯示臨時訊息彈窗（例如條碼錯誤），自動在 seconds 秒後隱藏
+        function showTempMessage(message, seconds = 3) {
+            try {
+                // 去除明顯的重複訊息，例如「書箱條碼號錯誤; 書箱條碼號錯誤」
+                if (typeof message === 'string') {
+                    const m = message.match(/^(.+?)[;；，,]\s*\1$/);
+                    if (m && m[1]) {
+                        message = m[1];
+                    }
+                }
+                const modal = document.getElementById('temp-message-modal');
+                const body = document.getElementById('temp-message-body');
+                if (!modal || !body) {
+                    // fallback to alert
+                    alert(message);
+                    return;
+                }
+                body.textContent = message;
+                modal.style.display = 'flex';
+                setTimeout(() => {
+                    modal.style.display = 'none';
+                }, (seconds || 3) * 1000);
+            } catch (e) {
+                console.error('showTempMessage failed', e);
+                try { alert(message); } catch(err){}
+            }
+        }
 
         // 流程控制
         async function startReturnProcess() {
@@ -495,24 +549,40 @@
             // statusText.textContent = '查詢書籍資料中...'; // 不顯示查詢中，避免使用者誤會
             // statusText.style.color = 'var(--primary-blue)';
 
+            // 顯示查詢中：沿用 loading overlay 風格
+            showLoading('查詢書籍資料中...');
             try {
                 const response = await fetch('/api/scan', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({ book_id: bookId })
                 });
+
+                // 若伺服器發生錯誤（例如無法連線圖書館系統），直接拒絕本次還書流程
+                if (response.status >= 500) {
+                    statusText.textContent = '圖書館伺服器查詢失敗，請再試一次';
+                    statusText.style.color = 'red';
+                    document.getElementById('main-scan-box').classList.remove('active');
+                    // 稍候自動返回首頁
+                    setTimeout(() => {
+                        resetFlow();
+                    }, 5000);
+                    return;
+                }
+
                 const result = await response.json();
 
                 if (result.success) {
                     scannedBooks.push(result.data);
                     updateBookList();
-                    // 檢查是否有附件
+                    // 檢查是否有附件：若有，先記錄，但仍先顯示確認頁
                     if (result.data.has_attachment) {
                         currentProcessingBook = result.data;
-                        nextStep('step-attachment-prompt');
                     } else {
-                        nextStep('step-confirm');
+                        currentProcessingBook = null;
                     }
+                    setConfirmNextButtonLabel();
+                    nextStep('step-confirm');
                 } else {
                     // 處理逾期錯誤
                     if (result.code === 'OVERDUE') {
@@ -535,20 +605,34 @@
                         return;
                     }
 
-                    statusText.textContent = result.message || '掃描失敗';
-                    statusText.style.color = 'red';
-                    // 3秒後重置狀態
-                    setTimeout(() => {
-                        statusText.textContent = '系統就緒，請掃描書籍條碼';
-                        statusText.style.color = 'var(--text-light)';
-                    }, 3000);
-                    document.getElementById('main-scan-box').classList.remove('active');
+                    // 若是書籍條碼錯誤，改用彈窗顯示並保持 5 秒，再回到首頁
+                    const msg = result.message || '書籍條碼錯誤';
+                    const isBarcodeErr = result.code === 'BARCODE_ERROR' || (msg && /條碼/.test(msg));
+                    if (isBarcodeErr) {
+                        // 顯示彈窗 3 秒
+                        showTempMessage(msg, 3);
+                        document.getElementById('main-scan-box').classList.remove('active');
+                        setTimeout(() => {
+                            resetFlow();
+                        }, 5000);
+                        // 不做紅色閃爍處理
+                    } else {
+                        statusText.textContent = result.message || '掃描失敗';
+                        statusText.style.color = 'red';
+                        // 3秒後重置狀態
+                        setTimeout(() => {
+                            statusText.textContent = '系統就緒，請掃描書籍條碼';
+                            statusText.style.color = 'var(--text-light)';
+                        }, 3000);
+                        document.getElementById('main-scan-box').classList.remove('active');
+                    }
                 }
             } catch (e) {
                 console.error(e);
                 statusText.textContent = '系統錯誤，請稍後再試';
                 statusText.style.color = 'red';
             } finally {
+                hideLoading();
                 // 只有在沒有成功掃描到書籍的情況下（或者出錯），才解除鎖定
                 // 如果成功了，因為限制只能一本，保持鎖定也無妨，但為了邏輯正確性，
                 // 我們可以解除鎖定，由上方的 scannedBooks.length 檢查來阻擋後續輸入
@@ -661,6 +745,7 @@
                     <span class="book-index">${index + 1}.</span>
                     <span class="book-name">${book.title}</span>
                     <span class="book-author">${book.author}</span>
+                    ${book.due_date ? `<div class="book-due" style="font-size:1rem; color:#c0392b; margin-top:6px; font-weight:600;">到期日：${book.due_date}</div>` : ''}
                 `;
                 list.appendChild(li);
             });
@@ -669,6 +754,11 @@
         // 前往投入書籍步驟（會呼叫硬體開門，顯示等待畫面直到完成）
         async function goToPlaceBookStep(btn) {
             if (scannedBooks.length === 0) return;
+            // 若當前書籍標記為含附件，先進入附件提示步驟
+            if (currentProcessingBook) {
+                nextStep('step-attachment-prompt');
+                return;
+            }
             if (btn) btn.disabled = true;
             // 先喚醒並執行 homing，再執行 open，避免因 state4 導致 open 失敗
             showLoading('機器啟動中 請稍等');
@@ -698,6 +788,17 @@
                 alert('系統錯誤，請稍後再試');
             } finally {
                 if (btn) setTimeout(() => { try { btn.disabled = false } catch(e){} }, 500);
+            }
+        }
+
+        // 動態更新確認頁「下一步」按鈕文字
+        function setConfirmNextButtonLabel() {
+            const btn = document.getElementById('confirm-next-btn');
+            if (!btn) return;
+            if (currentProcessingBook) {
+                btn.innerHTML = '<i class="fas fa-arrow-right"></i> 下一步：附件處理';
+            } else {
+                btn.innerHTML = '<i class="fas fa-arrow-right"></i> 下一步：投入還書箱';
             }
         }
 
@@ -792,6 +893,11 @@
             if (btn) btn.disabled = true;
     
             const bookIds = scannedBooks.map(b => b.book_id);
+            const booksPayload = scannedBooks.map(b => ({
+                book_id: b.book_id,
+                location: b.location || null,
+                target_bin: b.target_bin || null
+            }));
             // 直接執行還書 API（關門與檢查由後端處理）
             // 顯示「關門中」以反映使用者實際期待的動作；若後端回報 BOOK_NOT_DETECTED 再顯示重新開門
             showLoading('關門中，請稍候…', '關門中，請稍候');
@@ -799,7 +905,7 @@
                 const response = await fetch('/api/return', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ book_ids: bookIds })
+                    body: JSON.stringify({ book_ids: bookIds, books: booksPayload })
                 });
                 const result = await response.json();
     
@@ -827,6 +933,19 @@
         }
 
         // --- 附件處理流程 ---
+
+        // 使用者選擇「沒有借附件」：直接走一般還書流程，不再套用附件專用流程
+        async function skipAttachmentFlow(btn) {
+            if (btn) btn.disabled = true;
+            try {
+                // 將目前附件處理中的書籍視為一般書籍處理
+                currentProcessingBook = null;
+                // 直接進入投書步驟，避免再次顯示書本資訊
+                await goToPlaceBookStep(btn);
+            } finally {
+                if (btn) setTimeout(() => { try { btn.disabled = false } catch(e){} }, 300);
+            }
+        }
 
         // 1. 使用者確認先投書 -> 開門 -> 進入投書畫面 (這裡復用 goToPlaceBookStep 邏輯，但要改一下下一步)
         async function processBookWithAttachment(btn) {
@@ -877,7 +996,14 @@
                 const response = await fetch('/api/return', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ book_ids: [currentProcessingBook.book_id] })
+                    body: JSON.stringify({
+                        book_ids: [currentProcessingBook.book_id],
+                        books: [{
+                            book_id: currentProcessingBook.book_id,
+                            location: currentProcessingBook.location || null,
+                            target_bin: currentProcessingBook.target_bin || null
+                        }]
+                    })
                 });
                 const result = await response.json();
                 
