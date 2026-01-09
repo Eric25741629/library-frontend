@@ -213,6 +213,21 @@ def scan_book():
             }
         }), 400
 
+    # 5. 檢查是否有附件且不接受附件書籍
+    has_attachment = book_info.get('has_attachment', False)
+    if has_attachment and not config.ATTACHMENT_ACCEPTANCE_ENABLED:
+        logger.warning(f"Book {book_id} has attachment but attachment acceptance is disabled")
+        return jsonify({
+            "success": False,
+            "code": "ATTACHMENT_NOT_ACCEPTED",
+            "message": "暫時無法接受附件書，請洽櫃檯",
+            "data": {
+                "title": book_info['title'],
+                "author": book_info.get('author', 'Unknown'),
+                "attachment_desc": book_info.get('attachment_desc')
+            }
+        }), 400
+
     # 4. 成功回傳，並附上館藏位置與分櫃建議
     target_bin = _compute_target_bin(location, book_id)
     return jsonify({

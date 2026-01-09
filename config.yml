@@ -3,16 +3,20 @@ barcode_login_enabled: true
 book_check_enabled: true
 library:
   host: 140.125.246.11
-  institution_id: MAIN
+  institution_id: HyLib
+  # SIP2 AP (Current Location) 還書地點代碼
+  current_location: LB
   login_enabled: false
   login_pass: ''
   login_user: ''
   mock_enabled: false
   port: 6001
   # 控制還書功能是否真的執行到伺服器
-  checkin_enabled: false
+  checkin_enabled: true
+  # 是否接受附件書籍
+  attachment_acceptance_enabled: true
 logs:
-  backup_days: 30
+  backup_days: 300
 machine:
   baudrate: 9600
   port: /dev/uno

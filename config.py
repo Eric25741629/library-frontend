@@ -11,7 +11,7 @@ if cfg_file.exists():
         _cfg = {}
 
 # 預設值與對外變數 (向後相容)
-VERSION = "0.70"
+VERSION = "0.75"
 ADMIN_PASSWORD = _cfg.get('admin_password', 'admin')
 BARCODE_LOGIN_ENABLED = bool(_cfg.get('barcode_login_enabled', True))
 REQUIRE_ADMIN_LOGIN = bool(_cfg.get('require_admin_login', False))
@@ -32,12 +32,14 @@ LIBRARY_USER = LIBRARY_CONFIG.get('login_user', '')
 LIBRARY_PASS = LIBRARY_CONFIG.get('login_pass', '')
 LIBRARY_INSTITUTION = LIBRARY_CONFIG.get('institution_id', 'MAIN')
 LIBRARY_CHECKIN_ENABLED = bool(LIBRARY_CONFIG.get('checkin_enabled', False))
+LIBRARY_CURRENT_LOCATION = LIBRARY_CONFIG.get('current_location', LIBRARY_INSTITUTION)
+ATTACHMENT_ACCEPTANCE_ENABLED = bool(LIBRARY_CONFIG.get('attachment_acceptance_enabled', True))
 
 # 重新載入函式（如需在執行時重讀設定）
 def reload_config():
     global _cfg, ADMIN_PASSWORD, BARCODE_LOGIN_ENABLED, REQUIRE_ADMIN_LOGIN, MAX_RETURN_LIMIT
     global MACHINE_CONFIG, MACHINE_PORT, MACHINE_BAUDRATE, LOG_BACKUP_DAYS
-    global LIBRARY_CONFIG, LIBRARY_MOCK_ENABLED, LIBRARY_HOST, LIBRARY_PORT, LIBRARY_LOGIN_ENABLED, LIBRARY_USER, LIBRARY_PASS, LIBRARY_INSTITUTION
+    global LIBRARY_CONFIG, LIBRARY_MOCK_ENABLED, LIBRARY_HOST, LIBRARY_PORT, LIBRARY_LOGIN_ENABLED, LIBRARY_USER, LIBRARY_PASS, LIBRARY_INSTITUTION, LIBRARY_CURRENT_LOCATION, ATTACHMENT_ACCEPTANCE_ENABLED
     
     if cfg_file.exists():
         try:
@@ -64,3 +66,5 @@ def reload_config():
     LIBRARY_PASS = LIBRARY_CONFIG.get('login_pass', '')
     LIBRARY_INSTITUTION = LIBRARY_CONFIG.get('institution_id', 'MAIN')
     LIBRARY_CHECKIN_ENABLED = bool(LIBRARY_CONFIG.get('checkin_enabled', False))
+    LIBRARY_CURRENT_LOCATION = LIBRARY_CONFIG.get('current_location', LIBRARY_INSTITUTION)
+    ATTACHMENT_ACCEPTANCE_ENABLED = bool(LIBRARY_CONFIG.get('attachment_acceptance_enabled', True))

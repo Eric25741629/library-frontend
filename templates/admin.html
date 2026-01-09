@@ -668,6 +668,28 @@
                         </label>
                     </div>
 
+                    <div class="form-group" style="display:flex; align-items:center; gap:12px; margin-bottom:20px; background:#f8f9fa; padding:12px; border-radius:8px;">
+                        <label class="switch">
+                            <input type="checkbox" id="lib-checkin-enabled">
+                            <span class="slider round"></span>
+                        </label>
+                        <label for="lib-checkin-enabled" style="cursor:pointer; color:var(--text-primary); font-weight:500;">
+                            啟用真實還書 (SIP2 Checkin)
+                            <span style="display:block; font-weight:400; color:var(--text-secondary); font-size:13px;">關閉時僅機器收書與本機記錄，不會在圖書館帳號中完成還書。</span>
+                        </label>
+                    </div>
+
+                    <div class="form-group" style="display:flex; align-items:center; gap:12px; margin-bottom:20px; background:#f8f9fa; padding:12px; border-radius:8px;">
+                        <label class="switch">
+                            <input type="checkbox" id="lib-attachment-enabled">
+                            <span class="slider round"></span>
+                        </label>
+                        <label for="lib-attachment-enabled" style="cursor:pointer; color:var(--text-primary); font-weight:500;">
+                            接受附件書籍
+                            <span style="display:block; font-weight:400; color:var(--text-secondary); font-size:13px;">開啟時允許還附件書籍；關閉時偵測到附件書籍會拒絕還書。</span>
+                        </label>
+                    </div>
+
                     <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
                         <div class="form-group">
                             <label class="form-label">伺服器 IP (Host)</label>
@@ -1300,6 +1322,12 @@
                     document.getElementById('lib-user').value = data.config.login_user || '';
                     document.getElementById('lib-pass').value = data.config.login_pass || '';
                     document.getElementById('lib-inst').value = data.config.institution_id || '';
+                    if (data.config.checkin_enabled !== undefined) {
+                        document.getElementById('lib-checkin-enabled').checked = !!data.config.checkin_enabled;
+                    }
+                    if (data.config.attachment_acceptance_enabled !== undefined) {
+                        document.getElementById('lib-attachment-enabled').checked = !!data.config.attachment_acceptance_enabled;
+                    }
                     
                     const enabled = !!data.config.login_enabled;
                     document.getElementById('lib-login-enabled').checked = enabled;
@@ -1441,6 +1469,8 @@
 
             // Library
             const libMockEnabled = document.getElementById('lib-mock-enabled').checked;
+            const libCheckinEnabled = document.getElementById('lib-checkin-enabled').checked;
+            const libAttachmentEnabled = document.getElementById('lib-attachment-enabled').checked;
             const libHost = document.getElementById('lib-host').value;
             const libPort = document.getElementById('lib-port').value;
             const libLoginEnabled = document.getElementById('lib-login-enabled').checked;
@@ -1480,7 +1510,9 @@
                         login_enabled: libLoginEnabled,
                         login_user: libUser,
                         login_pass: libPass,
-                        institution_id: libInst
+                        institution_id: libInst,
+                        checkin_enabled: libCheckinEnabled,
+                        attachment_acceptance_enabled: libAttachmentEnabled
                     })
                 });
                 

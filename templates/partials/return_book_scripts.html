@@ -209,6 +209,23 @@
                         nextStep('step-confirm');
                     }
                 } else {
+                    // 處理不接受附件的錯誤
+                    if (result.code === 'ATTACHMENT_NOT_ACCEPTED') {
+                        // 顯示拒絕訊息（紅色）並在 5 秒後跳回首頁
+                        statusText.innerHTML = `
+                            <div style="color: #dc3545; font-weight: bold;">
+                                <i class="fas fa-ban"></i> ${result.message || '暫時無法接受附件書'}<br>
+                                書名：${(result.data && result.data.title) || ''}<br>
+                                請洽櫃檯
+                            </div>
+                        `;
+                        
+                        setTimeout(() => {
+                            resetFlow(); // 5秒後跳回首頁
+                        }, 5000);
+                        return;
+                    }
+
                     // 處理已在館內的錯誤
                     if (result.code === 'ALREADY_IN_LIBRARY') {
                         // 顯示已在館內警告並在 5 秒後跳回首頁

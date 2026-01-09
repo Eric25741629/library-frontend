@@ -335,7 +335,9 @@ def get_library_config():
             "login_enabled": global_config.LIBRARY_LOGIN_ENABLED,
             "login_user": global_config.LIBRARY_USER,
             "login_pass": "********" if global_config.LIBRARY_PASS else "",
-            "institution_id": global_config.LIBRARY_INSTITUTION
+            "institution_id": global_config.LIBRARY_INSTITUTION,
+            "checkin_enabled": global_config.LIBRARY_CHECKIN_ENABLED,
+            "attachment_acceptance_enabled": global_config.ATTACHMENT_ACCEPTANCE_ENABLED
         }
     })
 
@@ -347,6 +349,8 @@ def set_library_config():
     host = data.get('host')
     port = data.get('port')
     login_enabled = data.get('login_enabled', False)
+    checkin_enabled = data.get('checkin_enabled', False)
+    attachment_acceptance_enabled = data.get('attachment_acceptance_enabled', True)
     user = data.get('login_user')
     pwd = data.get('login_pass')
     inst = data.get('institution_id')
@@ -374,6 +378,8 @@ def set_library_config():
              lib_conf['login_pass'] = ""
              
         lib_conf['institution_id'] = inst or "MAIN"
+        lib_conf['checkin_enabled'] = bool(checkin_enabled)
+        lib_conf['attachment_acceptance_enabled'] = bool(attachment_acceptance_enabled)
         
         current_conf['library'] = lib_conf
         
