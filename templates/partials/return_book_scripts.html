@@ -209,6 +209,24 @@
                         nextStep('step-confirm');
                     }
                 } else {
+                    // 處理已在館內的錯誤
+                    if (result.code === 'ALREADY_IN_LIBRARY') {
+                        // 顯示已在館內警告並在 5 秒後跳回首頁
+                        const bookData = result.data || {};
+                        statusText.innerHTML = `
+                            <div style="color: #ffc107; font-weight: bold;">
+                                <i class="fas fa-info-circle"></i> 書籍已在館內<br>
+                                書名：${bookData.title || ''}<br>
+                                無需還書
+                            </div>
+                        `;
+                        
+                        setTimeout(() => {
+                            resetFlow(); // 5秒後跳回首頁
+                        }, 5000);
+                        return;
+                    }
+                    
                     // 處理逾期錯誤
                     if (result.code === 'OVERDUE') {
                         // 顯示逾期警告並在 5 秒後跳回首頁

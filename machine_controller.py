@@ -264,34 +264,40 @@ class MachineController:
             self.last_serial_time = time.time()
             self.last_cmd = cmd
             
-            # 處理特殊指令的狀態查詢暫停邏輯
+            # 處理特殊指令的狀態查詢邏輯
             if cmd == "close":
-        # 機器在觸發 close 時，應該暫停詢問機器狀態 15 秒
-                # 根據後文 put1 暫停 30 秒的語境，這裡 "觸發詢問機器狀態 15 秒" 極可能是 "暫停詢問 15 秒" 的筆誤
-                # 或者是指 "持續詢問 15 秒"？
-                # 但結合 put1 的 "暫停詢問狀態 30 秒"，推測 close 也是需要一段穩定時間。
-                # 但通常 close 動作期間不應查詢。
-                # 假設原意是：動作後需要一段時間讓機構復歸，這期間不應查詢。
-                # User: "機器在觸發close時 應該觸發詢問機器狀態15秒" -> 這句話比較曖昧
-                # User: "機器在觸發put1時 應該暫停詢問狀態30秒" -> 這句話很明確
-                
-                # 重新審視 "觸發詢問機器狀態15秒"：
-                # 1. 可能是 "暫停詢問 15 秒" (Pause query for 15s)
-                # 2. 可能是 "持續詢問 15 秒" (Keep querying for 15s to confirm closed)
-                # 考慮到 close 是一個動作，完成後需要確認狀態。
-                # 但 put1 是分類動作，動作時間長，所以需要暫停查詢以免干擾。
-                # close 動作相對快，但可能需要確認有沒有夾手或異物。
-                # 如果是 "暫停詢問"，那邏輯一致。如果是 "觸發詢問"，那邏輯相反。
-                
-                # 根據一般嵌入式控制經驗，動作指令發送後通常會有一段 "不應打擾期"。
-                # 假設 user 筆誤，意指 "暫停詢問"。若 user 真意是 "密集詢問"，則需另寫邏輯。
-                # 暫時採取 "暫停詢問 15 秒" 以保持系統穩定，避免在動作未完成時 query 造成衝突。
-                # 如果 user 發現不對，會再反饋。
+                # 機器在觸發 close 時，應該暫停詢問機器狀態 15 秒
                 self.pause_query_until = time.time() + 15
                 
             elif cmd.startswith("put"):
-                # 機器在觸發 put1 (或 put2) 時，應該暫停詢問狀態 30 秒
-                self.pause_query_until = time.time() + 30
+                # Put 指令（分類動作）：不設定固定暫停，而是主動輪詢直到完成
+                # 持續詢問狀態直到機器回到穩定狀態，最多不超過 5 分鐘
+                self.logger.info(f"Put command issued. Waiting for completion (max 5 minutes)...")
+                wait_deadline = time.time() + 300  # 5 分鐘 = 300 秒
+                
+                while time.time() < wait_deadline:
+                    time.sleep(1)  # 每 1 秒詢問一次狀態
+                    try:
+                        status = self.get_status()
+                        s = str(status).strip()
+                        
+                        # 若狀態回復為穩定狀態（STATE_HOMED=2 或 STATE_CLOSED=4），視為完成
+                        if s.isdigit():
+                            code = int(s)
+                            if code in [self.STATE_HOMED, self.STATE_CLOSED]:
+                                self.logger.info(f"Put operation completed. Machine state: {code}")
+                                self.action_in_progress = False
+                                self.current_action_code = None
+                                break
+                        else:
+                            self.logger.debug(f"Put operation in progress... Current status: {s}")
+                    except Exception as e:
+                        self.logger.debug(f"Status query during put: {e}")
+                else:
+                    # 超時
+                    self.logger.warning(f"Put operation timeout after 5 minutes")
+                    self.action_in_progress = False
+                    self.current_action_code = None
             
             return response
         finally:

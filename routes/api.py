@@ -11,9 +11,21 @@ import config
 api_bp = Blueprint('api', __name__)
 logger = logging.getLogger('api')
 
-def _compute_target_bin(location: str) -> int:
-    """中文館藏使用 put1(=1)，其他使用 put2(=2)。"""
+def _compute_target_bin(location: str, book_id: str = None) -> int:
+    """根據條碼編號決定分類箱：
+    - 條碼以 C 或 G 開頭 → put1 (=1)
+    - 其他 → put2 (=2)
+    """
     try:
+        # 優先使用條碼編號前綴判斷
+        if book_id:
+            b_id = str(book_id).strip().upper()
+            if b_id.startswith('C') or b_id.startswith('G'):
+                return 1
+            else:
+                return 2
+        
+        # 如果沒有條碼，回退到館藏位置判斷（中文館藏使用 put1）
         text = (location or '').strip()
         return 1 if ('中文' in text) else 2
     except Exception:
@@ -145,21 +157,36 @@ def scan_book():
 
     logger.info(f"Found book: {book_info.get('title', 'Unknown')} by {book_info.get('author', 'Unknown')}")
 
+    # 2. 檢查是否在館內（根據 due_date 欄位 AH 的內容）
+    due_date_str = book_info.get('due_date', '').strip()
+    if '在館內' in due_date_str or '仍在館內' in due_date_str:
+        logger.warning(f"Book {book_id} is already in library (due_date: {due_date_str})")
+        return jsonify({
+            "success": False,
+            "code": "ALREADY_IN_LIBRARY",
+            "message": f"書籍「{book_info['title']}」已經在館內了，無需還書。",
+            "data": {
+                "title": book_info['title'],
+                "author": book_info.get('author', 'Unknown'),
+                "status": due_date_str
+            }
+        }), 400
+
     image_url = f"https://picsum.photos/seed/{book_id}/100/150"
 
-    # 2. 以 libwebpac_playwright 查詢到期日與館藏位置
-    due_date_str = None
+    # 3. 以 libwebpac_playwright 查詢到期日與館藏位置
     location = None
     try:
         from libwebpac_playwright import fetch_due_and_location
-        due_date_str, location = asyncio.run(fetch_due_and_location(book_id, debug=False))
+        due_date_str_webpac, location = asyncio.run(fetch_due_and_location(book_id, debug=False))
+        # 如果 webpac 查詢成功，優先使用 webpac 的結果
+        if due_date_str_webpac:
+            due_date_str = due_date_str_webpac
     except Exception as e:
         logger.warning(f"webpac due/location probe failed for {book_id}: {e}")
-        # fallback 使用 SIP2 的 due_date，如果有
-        due_date_str = book_info.get('due_date')
-        location = None
+        # fallback 已經有 SIP2 的 due_date 了
 
-    # 3. 檢查是否逾期（以 YYYY-MM-DD 格式判定；'在架' 視為未逾期）
+    # 4. 檢查是否逾期（以 YYYY-MM-DD 格式判定；'在架' 視為未逾期）
     is_overdue = False
     if isinstance(due_date_str, str):
         if due_date_str.strip() == '在架':
@@ -187,7 +214,7 @@ def scan_book():
         }), 400
 
     # 4. 成功回傳，並附上館藏位置與分櫃建議
-    target_bin = _compute_target_bin(location)
+    target_bin = _compute_target_bin(location, book_id)
     return jsonify({
         "success": True,
         "message": "掃描成功",
@@ -487,9 +514,11 @@ def return_book():
                 }), 400
 
             if selected_bin is None:
-                # 嘗試以最後一本的 location 決定
-                last_loc = (returned_books[-1] or {}).get('location') if returned_books else None
-                selected_bin = _compute_target_bin(last_loc)
+                # 嘗試以最後一本的條碼編號和館藏位置決定
+                last_book = returned_books[-1] if returned_books else {}
+                last_book_id = last_book.get('book_id')
+                last_loc = last_book.get('location')
+                selected_bin = _compute_target_bin(last_loc, last_book_id)
             machine.sort_book(int(selected_bin or 1))
         except Exception as e:
             logger.error(f"sort_book failed: {e}")
