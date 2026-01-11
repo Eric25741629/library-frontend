@@ -141,6 +141,15 @@
         <!-- Step 3.5: Place Book Instruction -->
         <section id="step-place-book" class="step-section">
             <h2 class="section-title">請將書本放入還書機內</h2>
+            {% if book_check_enabled %}
+            <p style="text-align:center; color:#28a745; font-size:1.1rem; margin-bottom:0.5rem;">
+                <i class="fas fa-check-circle"></i> 本機已啟用書籍檢測，未放書將自動提醒您。
+            </p>
+            {% else %}
+            <p style="text-align:center; color:#ffc107; font-size:1.1rem; margin-bottom:0.5rem;">
+                <i class="fas fa-bolt"></i> 目前為快速還書模式，系統不檢查是否有放書，請自行確認。
+            </p>
+            {% endif %}
             
             <div class="place-book-instruction">
                 <div class="place-book-anim-container">
@@ -895,6 +904,8 @@
             const bookIds = scannedBooks.map(b => b.book_id);
             const booksPayload = scannedBooks.map(b => ({
                 book_id: b.book_id,
+                title: b.title || null,
+                image_url: b.image_url || null,
                 location: b.location || null,
                 target_bin: b.target_bin || null
             }));
@@ -1000,6 +1011,8 @@
                         book_ids: [currentProcessingBook.book_id],
                         books: [{
                             book_id: currentProcessingBook.book_id,
+                            title: currentProcessingBook.title || null,
+                            image_url: currentProcessingBook.image_url || null,
                             location: currentProcessingBook.location || null,
                             target_bin: currentProcessingBook.target_bin || null
                         }]
@@ -1120,7 +1133,14 @@
                     body: JSON.stringify({
                         book_ids: [currentProcessingBook.book_id],
                         attachment_only: true,
-                        attachment_barcode: currentAttachmentBarcode
+                        attachment_barcode: currentAttachmentBarcode,
+                        books: [{
+                            book_id: currentProcessingBook.book_id,
+                            title: currentProcessingBook.title || null,
+                            image_url: currentProcessingBook.image_url || null,
+                            location: currentProcessingBook.location || null,
+                            target_bin: currentProcessingBook.target_bin || null
+                        }]
                     })
                 });
                 const result = await response.json();

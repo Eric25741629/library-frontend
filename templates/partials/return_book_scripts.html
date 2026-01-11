@@ -703,7 +703,8 @@
                     body: JSON.stringify({
                         book_ids: [currentProcessingBook.book_id],
                         attachment_only: true,
-                        attachment_barcode: currentAttachmentBarcode
+                        attachment_barcode: currentAttachmentBarcode,
+                        books: [currentProcessingBook]
                     })
                 });
                 const result = await response.json();

@@ -15,6 +15,8 @@ def index():
         'service_suspended': shared.is_box_full(),
         'scan_guide_image': scan_guide,
         'place_book_guide_image': place_book_guide,
+        # 是否啟用書籍檢測，提供前台顯示狀態用
+        'book_check_enabled': getattr(shared, 'BOOK_CHECK_ENABLED', True),
     }
     return render_template('return_book.html', **ctx)
 
@@ -46,4 +48,4 @@ def admin():
     current_config = {
         'max_return_limit': shared.MAX_RETURN_LIMIT
     }
-    return render_template('admin.html', config=current_config)
+    return render_template('admin.html', config=current_config, app_version=getattr(shared, 'APP_VERSION', 'unknown'))

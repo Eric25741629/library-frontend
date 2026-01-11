@@ -25,6 +25,11 @@ LOG_DIR = BASE_DIR / 'logs'
 LOG_DIR.mkdir(exist_ok=True)
 
 # 全域變數 (將在 init_shared 中初始化)
+# 介面版本：修改前後端行為時請同步更新，供後台顯示
+# 介面版本：修改前後端行為時請同步更新，供後台顯示
+# 目前為 Beta 釋出，標註可能仍有 bug
+APP_VERSION = "v0.86.2beta"
+
 cfg = {}
 MAX_RETURN_LIMIT = 20
 BOOK_CHECK_ENABLED = True

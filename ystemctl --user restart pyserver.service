@@ -1,0 +1,72 @@
+[0;4m [0m[0;4m UNIT                                             [0m[0;4m LOAD     [0m[0;4m ACTIVE  [0m[0;4m SUB    [0m[0;4m DESCRIPTION                                                 [0m
+  at-spi-dbus-bus.service                           loaded    active   running Accessibility services bus                                  
+  dbus.service                                      loaded    active   running D-Bus User Message Bus                                      
+  dirmngr.service                                   loaded    inactive dead    GnuPG network certificate management daemon                 
+  evolution-addressbook-factory.service             loaded    active   running Evolution address book service                              
+  evolution-calendar-factory.service                loaded    active   running Evolution calendar service                                  
+  evolution-source-registry.service                 loaded    active   running Evolution source registry                                   
+  gnome-initial-setup-copy-worker.service           loaded    inactive dead    GNOME Initial Setup Copy Worker                             
+  gnome-initial-setup-first-login.service           loaded    inactive dead    GNOME Initial Setup                                         
+  gnome-initial-setup.service                       loaded    inactive dead    GNOME Initial Setup                                         
+  gnome-keyring-ssh.service                         loaded    active   exited  Start gnome-keyring as SSH agent                            
+  gnome-keyring.service                             loaded    inactive dead    Start gnome-keyring for the Secrets Service, and PKCS #11   
+  gnome-session-failed.service                      loaded    inactive dead    GNOME Session Failed lockdown screen (user)                 
+  gnome-session-manager@gnome-initial-setup.service loaded    inactive dead    GNOME Session Manager (session: gnome-initial-setup)        
+  gnome-session-manager@gnome-login.service         loaded    inactive dead    GNOME Session Manager (session: gnome-login)                
+  gnome-session-manager@ubuntu.service              loaded    active   running GNOME Session Manager (session: ubuntu)                     
+  gnome-session-monitor.service                     loaded    active   running Monitor Session leader for GNOME Session                    
+  gnome-session-restart-dbus.service                loaded    inactive dead    Restart DBus after GNOME Session shutdown                   
+  gnome-session-signal-init.service                 loaded    inactive dead    Signal initialization done to GNOME Session Manager         
+  gnome-shell-disable-extensions.service            loaded    inactive dead    Disable GNOME Shell extensions after failure                
+  gnome-shell-x11.service                           loaded    active   running GNOME Shell on X11                                          
+  gnome-terminal-server.service                     loaded    active   running GNOME Terminal Server                                       
+  gnome-welcome-tour.service                        loaded    inactive dead    GNOME Welcome Tour                                          
+  gpg-agent.service                                 loaded    inactive dead    GnuPG cryptographic agent and passphrase cache              
+  gsd-a11y-settings.service                         loaded    active   running GNOME Accessibility settings                                
+  gsd-color.service                                 loaded    active   running GNOME Color management                                      
+  gsd-datetime.service                              loaded    active   running GNOME Date & Time handling                                  
+  gsd-housekeeping.service                          loaded    active   running GNOME Maintenance of expirable data                         
+  gsd-keyboard.service                              loaded    active   running GNOME Keyboard handling                                     
+  gsd-media-keys.service                            loaded    active   running GNOME Media keys handling                                   
+  gsd-power.service                                 loaded    active   running GNOME Power management handling                             
+  gsd-print-notifications.service                   loaded    active   running GNOME Printer notifications                                 
+  gsd-rfkill.service                                loaded    active   running GNOME RFKill handling                                       
+  gsd-screensaver-proxy.service                     loaded    active   running GNOME Freedesktop screensaver handling                      
+  gsd-sharing.service                               loaded    active   running GNOME Sharing handling                                      
+  gsd-smartcard.service                             loaded    active   running GNOME Smartcard handling                                    
+  gsd-sound.service                                 loaded    active   running GNOME Sound sample caching handling                         
+  gsd-usb-protection.service                        loaded    active   running GNOME USB protection handling                               
+  gsd-wacom.service                                 loaded    active   running GNOME Wacom handling                                        
+  gsd-wwan.service                                  loaded    active   running GNOME WWan management                                       
+  gsd-xsettings.service                             loaded    active   running GNOME XSettings                                             
+  gvfs-afc-volume-monitor.service                   loaded    active   running Virtual filesystem service - Apple File Conduit monitor     
+  gvfs-daemon.service                               loaded    active   running Virtual filesystem service                                  
+  gvfs-goa-volume-monitor.service                   loaded    active   running Virtual filesystem service - GNOME Online Accounts monitor  
+  gvfs-gphoto2-volume-monitor.service               loaded    active   running Virtual filesystem service - digital camera monitor         
+  gvfs-metadata.service                             loaded    active   running Virtual filesystem metadata service                         
+  gvfs-mtp-volume-monitor.service                   loaded    active   running Virtual filesystem service - Media Transfer Protocol monitor
+  gvfs-udisks2-volume-monitor.service               loaded    active   running Virtual filesystem service - disk device monitor            
+  kiosk-browser.service                             loaded    inactive dead    Firefox Auto (restart on crash)                             
+  pk-debconf-helper.service                         loaded    inactive dead    debconf communication service                               
+  pulseaudio.service                                loaded    active   running Sound Service                                               
+  pyserver.service                                  loaded    active   running Python Server (Flask) - autostart                           
+  session-migration.service                         loaded    inactive dead    Session Migration                                           
+  snapd.session-agent.service                       loaded    inactive dead    snapd user session agent                                    
+  ssh-agent.service                                 loaded    inactive dead    OpenSSH Agent                                               
+[0;1;38;5;185m●[0m systemd-remount-fs.service                        [0;1;31mnot-found[0m inactive dead    systemd-remount-fs.service                                  
+  tracker-miner-fs.service                          loaded    active   running Tracker file system data miner                              
+  ubuntu-report.service                             loaded    inactive dead    Ubuntu report sends pending metrics data                    
+  unicast-local-avahi.service                       loaded    inactive dead    Notification regarding avahi disabled due to .local domain  
+  update-notifier-crash.service                     loaded    inactive dead    Notification regarding a crash report                       
+  update-notifier-release.service                   loaded    inactive dead    Notification regarding a new release of Ubuntu              
+  xdg-desktop-portal-gtk.service                    loaded    active   running Portal service (GTK+/GNOME implementation)                  
+  xdg-desktop-portal.service                        loaded    active   running Portal service                                              
+  xdg-document-portal.service                       loaded    active   running flatpak document portal service                             
+  xdg-permission-store.service                      loaded    active   running sandboxed app permission store                              
+
+LOAD   = Reflects whether the unit definition was properly loaded.
+ACTIVE = The high-level unit activation state, i.e. generalization of SUB.
+SUB    = The low-level unit activation state, values depend on unit type.
+
+[0;1;39m64 loaded units listed.[0m
+To show all installed unit files use 'systemctl list-unit-files'.

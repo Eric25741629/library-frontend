@@ -468,25 +468,13 @@ def return_book():
                 # 前端若已提供 image_url 則沿用，否則使用預設隨機圖
                 image_url = book_source.get('image_url') or f"https://picsum.photos/seed/{b_id}/100/150"
 
-                # 若未提供 location，嘗試查詢（但不阻擋流程）
-                # 館藏地優先使用前端掃描時就取得的資料，若沒有再嘗試 webpac 查詢
-                location_val = None
-                try:
-                    location_val = book_source.get('location') if isinstance(book_source, dict) else None
-                    if not location_val:
-                        from libwebpac_playwright import fetch_due_and_location
-                        _, location_val = asyncio.run(fetch_due_and_location(b_id, debug=False))
-                except Exception:
-                    location_val = None
-
-                cursor.execute('INSERT INTO box_inventory (book_id, title, image_url, return_time, location) VALUES (?, ?, ?, ?, ?)',
-                               (b_id, title, image_url, current_time, location_val))
+                cursor.execute('INSERT INTO box_inventory (book_id, title, image_url, return_time) VALUES (?, ?, ?, ?)',
+                               (b_id, title, image_url, current_time))
 
                 returned_books.append({
                     "book_id": b_id,
                     "title": title,
-                    "return_time": current_time,
-                    "location": location_val
+                    "return_time": current_time
                 })
         # 若有任何一本書還書指令失敗，則：
         # 1) 回滾本次交易，不記錄到本地 box_inventory

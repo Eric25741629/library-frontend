@@ -244,6 +244,18 @@
         /* Table */
         .table-container {
             overflow-x: auto;
+            /* 當前箱內/歷史列表過長時，卡片內部可垂直捲動；scroll 讓捲軸常駐顯示 */
+            max-height: 520px; /* 稍微放高一點，多顯示幾筆 */
+            overflow-y: scroll;
+            position: relative;
+        }
+
+        /* 讓表頭固定在滾動區上方，不跟著內容一起滾走 */
+        .table-container thead th {
+            position: sticky;
+            top: 0;
+            background-color: var(--card-bg);
+            z-index: 2;
         }
 
         table {
@@ -487,6 +499,9 @@
                     <p>歡迎回來，管理員</p>
                 </div>
                 <div class="header-actions">
+                    <span style="align-self:center; color: var(--text-secondary); font-size: 13px; margin-right: 8px;">
+                        版本：{{ app_version or 'unknown' }}
+                    </span>
                     <button class="btn btn-warning" onclick="clearHistory()">
                         <i class="fas fa-eraser"></i> 清空紀錄
                     </button>
