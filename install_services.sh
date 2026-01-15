@@ -1,392 +1,247 @@
 #!/usr/bin/env bash
-
-# install_services.sh
-
-#
-
-# 功能：
-
-#  1) systemd --user 啟動 Flask 伺服器：python3 ~/下載/圖書館-前端/app.py
-
-#  2) 等 http://127.0.0.1:5000/ 可連線後，開 Firefox 到該網址
-
-#  3) Firefox 退出/崩潰後自動重啟（Restart=always）
-
-#
-
-# 安裝：  ./install_services.sh install
-
-# 解除：  ./install_services.sh uninstall
-
-# 日誌：  journalctl --user -u pyserver.service -f
-
-#        journalctl --user -u kiosk-browser.service -f
-
-
-
 set -euo pipefail
 
+# =========================================================
+# Ubuntu 20.04 Kiosk Full Setup Script
+# - GDM autologin kiosk (Xorg)
+# - Kiosk X Session (matchbox) that runs Flask + Firefox --kiosk
+# - Hardening: disable Ctrl+Alt+Del, tty2-tty6, sysrq, power keys
+# - Copy project into /home/kiosk/下載/圖書館-前端
+# - Optional ACL for ros to edit /home/kiosk via VS Code
+# =========================================================
 
-
-# ====== 你的專案設定（已依你貼的內容填好）======
-
-PROJECT_DIR="$HOME/下載/圖書館-前端"
-
-SERVER_CMD="/usr/bin/python3 $HOME/下載/圖書館-前端/app.py"
+# ===== 可調參數 =====
+TARGET_USER="kiosk"
+SOURCE_PROJECT_DIR_DEFAULT="$(pwd)"
+TARGET_PROJECT_DIR="/home/${TARGET_USER}/下載/圖書館-前端"
 
 URL="http://127.0.0.1:5000/"
-
 WAIT_TIMEOUT=60
 
-
-
 BROWSER_BIN="firefox"
+BROWSER_ARGS=(--kiosk)
 
-BROWSER_ARGS=(--new-window)
+GDM_CONF="/etc/gdm3/custom.conf"
 
-# 若你的 Firefox 支援 kiosk，可改成：BROWSER_ARGS=(--kiosk)
-
-
-
-# ====== 安裝位置 ======
-
-SYSTEMD_USER_DIR="$HOME/.config/systemd/user"
-
-BIN_DIR="$HOME/bin"
-
-WAIT_SCRIPT="$BIN_DIR/start_browser_after_server.sh"
-
-PY_UNIT="$SYSTEMD_USER_DIR/pyserver.service"
-
-BROWSER_UNIT="$SYSTEMD_USER_DIR/kiosk-browser.service"
-
-
+# ===== 工具函數 =====
+need_root() {
+  if [[ "${EUID}" -ne 0 ]]; then
+    echo "[ERROR] 這支腳本要用 root 執行，請用：sudo bash $0"
+    exit 1
+  fi
+}
 
 log() { printf "\n\033[1m%s\033[0m\n" "$*"; }
 
-
-
-sanity_checks() {
-
-  [[ -d "$PROJECT_DIR" ]] || { echo "[ERROR] 專案資料夾不存在：$PROJECT_DIR" >&2; exit 1; }
-
-  command -v systemctl >/dev/null 2>&1 || { echo "[ERROR] 找不到 systemctl（需要 systemd）。" >&2; exit 1; }
-
-  command -v python3  >/dev/null 2>&1 || { echo "[ERROR] 找不到 python3。" >&2; exit 1; }
-
-  command -v "$BROWSER_BIN" >/dev/null 2>&1 || { echo "[WARN] 找不到 $BROWSER_BIN，請先安裝 Firefox。" >&2; }
-
+ensure_pkg() {
+  log "安裝必要套件（firefox/curl/matchbox/unclutter/xset/acl）"
+  apt-get update -y
+  apt-get install -y \
+    firefox curl \
+    matchbox-window-manager unclutter x11-xserver-utils \
+    acl
 }
 
+ensure_user() {
+  if ! id "${TARGET_USER}" &>/dev/null; then
+    log "建立使用者 ${TARGET_USER}"
+    # 建立但不設定密碼（給 GDM autologin 用）
+    adduser --disabled-password --gecos "" "${TARGET_USER}"
+  else
+    log "使用者 ${TARGET_USER} 已存在"
+  fi
 
+  # kiosk 不該有 sudo 權限
+  deluser "${TARGET_USER}" sudo 2>/dev/null || true
 
-write_wait_script() {
+  # 本機免密碼（用於 GDM autologin / 本機登入）
+  # 注意：SSH 通常不允許空密碼，所以 VS Code 建議用 ros 登入 SSH
+  passwd -d "${TARGET_USER}" >/dev/null 2>&1 || true
+}
 
-  mkdir -p "$BIN_DIR"
+set_gdm_autologin() {
+  log "設定 GDM 自動登入：${TARGET_USER}（並強制 Xorg）"
 
+  [[ -f "${GDM_CONF}" ]] || touch "${GDM_CONF}"
 
+  # 確保有 [daemon]
+  if ! grep -q '^\[daemon\]' "${GDM_CONF}"; then
+    printf "[daemon]\n" | cat - "${GDM_CONF}" > "${GDM_CONF}.tmp" && mv "${GDM_CONF}.tmp" "${GDM_CONF}"
+  fi
 
-  # 直接把變數寫進檔案（不使用 sed 替換，避免你遇到的錯誤）
+  # 移除舊設定（避免重複）
+  sed -i \
+    -e '/^[[:space:]]*WaylandEnable[[:space:]]*=/d' \
+    -e '/^[[:space:]]*AutomaticLoginEnable[[:space:]]*=/d' \
+    -e '/^[[:space:]]*AutomaticLogin[[:space:]]*=/d' \
+    "${GDM_CONF}"
 
-  cat > "$WAIT_SCRIPT" <<EOF
+  # 插入新設定（不留空格，避免解析差異）
+  awk -v user="${TARGET_USER}" '
+    BEGIN{done=0}
+    /^\[daemon\]$/ && done==0 {
+      print $0
+      print "WaylandEnable=false"
+      print "AutomaticLoginEnable=True"
+      print "AutomaticLogin=" user
+      done=1
+      next
+    }
+    {print $0}
+  ' "${GDM_CONF}" > "${GDM_CONF}.tmp" && mv "${GDM_CONF}.tmp" "${GDM_CONF}"
+}
 
+copy_project() {
+  local src="${1}"
+  log "複製專案：${src} -> ${TARGET_PROJECT_DIR}"
+
+  if [[ ! -d "${src}" ]]; then
+    echo "[ERROR] 來源專案資料夾不存在：${src}"
+    exit 1
+  fi
+
+  mkdir -p "/home/${TARGET_USER}/下載"
+  rm -rf "${TARGET_PROJECT_DIR}"
+  cp -a "${src}" "${TARGET_PROJECT_DIR}"
+  chown -R "${TARGET_USER}:${TARGET_USER}" "/home/${TARGET_USER}/下載"
+}
+
+ensure_kiosk_session() {
+  log "建立 Kiosk X Session（matchbox：不進 GNOME，只跑 Flask + Firefox）"
+
+  # 1) 建立 xsessions entry
+  cat > /usr/share/xsessions/kiosk.desktop <<'EOF'
+[Desktop Entry]
+Name=Kiosk
+Comment=Locked kiosk session
+Exec=/usr/local/bin/kiosk-session.sh
+Type=Application
+EOF
+
+  # 2) 建立 session 腳本
+  cat > /usr/local/bin/kiosk-session.sh <<EOF
 #!/usr/bin/env bash
-
 set -euo pipefail
 
+PROJECT_DIR="${TARGET_PROJECT_DIR}"
+APP="\${PROJECT_DIR}/app.py"
+URL="${URL}"
+WAIT_TIMEOUT="${WAIT_TIMEOUT}"
 
+# 關閉螢幕保護/省電
+xset s off
+xset -dpms
+xset s noblank
 
-URL="$URL"
+# 隱藏滑鼠
+unclutter -idle 0.1 -root &
 
-WAIT_TIMEOUT="$WAIT_TIMEOUT"
+# 極簡 WM（無面板、無系統選單）
+matchbox-window-manager -use_titlebar no &
 
-BROWSER_BIN="$BROWSER_BIN"
+# Flask：掛了就重啟
+server_loop() {
+  while true; do
+    cd "\${PROJECT_DIR}"
+    /usr/bin/python3 "\${APP}" || true
+    sleep 1
+  done
+}
+server_loop &
 
-BROWSER_ARGS=($(printf '%q ' "${BROWSER_ARGS[@]}"))
-
-
-
-have_cmd() { command -v "\$1" >/dev/null 2>&1; }
-
-
-
-wait_for_http() {
-
-  local url="\$1"
-
-  local timeout="\$2"
-
-
-
-  if have_cmd curl; then
-
-    for i in \$(seq 1 "\$timeout"); do
-
-      if curl -fsS "\$url" >/dev/null 2>&1; then
-
-        return 0
-
-      fi
-
-      sleep 1
-
-    done
-
-    return 1
-
+# 等服務就緒
+for i in \$(seq 1 "\${WAIT_TIMEOUT}"); do
+  if curl -fsS "\${URL}" >/dev/null 2>&1; then
+    break
   fi
+  sleep 1
+done
 
+# Firefox：被關掉/崩潰就立刻拉回來
+while true; do
+  ${BROWSER_BIN} ${BROWSER_ARGS[*]} "\${URL}" || true
+  sleep 0.5
+done
+EOF
 
+  chmod +x /usr/local/bin/kiosk-session.sh
 
-  if have_cmd python3; then
+  # 3) 讓 kiosk 使用者預設 Session=kiosk
+  cat > "/home/${TARGET_USER}/.dmrc" <<'EOF'
+[Desktop]
+Session=kiosk
+EOF
+  chown "${TARGET_USER}:${TARGET_USER}" "/home/${TARGET_USER}/.dmrc"
+  chmod 644 "/home/${TARGET_USER}/.dmrc"
+}
 
-    python3 - <<PY || return 1
+harden_lockdown() {
+  log "加固鎖定：禁 Ctrl+Alt+Del / 禁 tty2~tty6 / 禁 SysRq / 電源鍵忽略"
 
-import sys, time, socket, urllib.parse
+  # Ctrl+Alt+Del
+  systemctl mask ctrl-alt-del.target >/dev/null 2>&1 || true
+  systemctl daemon-reload >/dev/null 2>&1 || true
 
-u = urllib.parse.urlparse("$URL")
+  # 禁 tty2~tty6（保留 tty1 方便救援）
+  systemctl mask \
+    getty@tty2.service getty@tty3.service getty@tty4.service \
+    getty@tty5.service getty@tty6.service >/dev/null 2>&1 || true
 
-host = u.hostname or "127.0.0.1"
+  # 禁 SysRq（避免 REISUB）
+  echo 'kernel.sysrq = 0' > /etc/sysctl.d/99-kiosk.conf
+  sysctl --system >/dev/null 2>&1 || true
 
-port = u.port or (443 if u.scheme=="https" else 80)
+  # 電源鍵/睡眠鍵忽略（避免跳出關機 UI）
+  sed -i '/^HandlePowerKey=/d;/^HandleRebootKey=/d;/^HandleSuspendKey=/d;/^HandleHibernateKey=/d;/^HandleLidSwitch=/d' /etc/systemd/logind.conf
+  cat >> /etc/systemd/logind.conf <<'EOF'
 
-path = u.path or "/"
+HandlePowerKey=ignore
+HandleRebootKey=ignore
+HandleSuspendKey=ignore
+HandleHibernateKey=ignore
+HandleLidSwitch=ignore
+EOF
+  systemctl restart systemd-logind >/dev/null 2>&1 || true
+}
 
-timeout = int("$WAIT_TIMEOUT")
-
-for _ in range(timeout):
-
-    try:
-
-        s = socket.create_connection((host, port), timeout=2)
-
-        req = f"GET {path} HTTP/1.1\\r\\nHost: {host}\\r\\nConnection: close\\r\\n\\r\\n"
-
-        s.sendall(req.encode("utf-8"))
-
-        s.recv(1)
-
-        s.close()
-
-        sys.exit(0)
-
-    except Exception:
-
-        time.sleep(1)
-
-sys.exit(1)
-
-PY
-
-    return 0
-
+optional_acl_for_ros() {
+  # 讓 ros 用 VS Code 直接改 /home/kiosk，不用一直 sudo
+  if id ros &>/dev/null; then
+    log "加上 ACL：讓 ros 可直接讀寫 /home/${TARGET_USER}（方便 VS Code Remote SSH）"
+    setfacl -R -m u:ros:rwx "/home/${TARGET_USER}" || true
+    setfacl -R -d -m u:ros:rwx "/home/${TARGET_USER}" || true
   fi
-
-
-
-  echo "[ERROR] 需要 curl 或 python3 才能等待服務就緒" >&2
-
-  return 1
-
 }
 
-
-
-echo "[INFO] Waiting for server: \$URL (timeout: \${WAIT_TIMEOUT}s)"
-
-if ! wait_for_http "\$URL" "\$WAIT_TIMEOUT"; then
-
-  echo "[ERROR] Timeout waiting for \$URL" >&2
-
-  exit 1
-
-fi
-
-
-
-echo "[INFO] Server is up. Launching browser..."
-
-exec "\$BROWSER_BIN" "\${BROWSER_ARGS[@]}" "\$URL"
-
-EOF
-
-
-
-  chmod +x "$WAIT_SCRIPT"
-
+print_summary() {
+  log "完成！重點設定如下"
+  echo "- Ubuntu: 20.04.x（已用 matchbox 建立 Kiosk Session）"
+  echo "- GDM autologin: ${TARGET_USER}"
+  echo "- Project dir: ${TARGET_PROJECT_DIR}"
+  echo "- URL: ${URL}"
+  echo ""
+  echo "下一步："
+  echo "  sudo reboot"
+  echo ""
+  echo "若要維修（建議用 ros SSH / VS Code）："
+  echo "  - 專案路徑：${TARGET_PROJECT_DIR}"
+  echo "  - kiosk session 腳本：/usr/local/bin/kiosk-session.sh"
+  echo "  - 如需暫時解除 tty 封鎖：sudo systemctl unmask getty@tty2.service ...（或進救援模式）"
 }
 
+main() {
+  need_root
 
+  local src="${1:-${SOURCE_PROJECT_DIR_DEFAULT}}"
 
-write_py_unit() {
-
-  mkdir -p "$SYSTEMD_USER_DIR"
-
-  cat > "$PY_UNIT" <<EOF
-
-[Unit]
-
-Description=Python Server (Flask) - autostart
-
-After=network-online.target
-
-Wants=network-online.target
-
-
-
-[Service]
-
-Type=simple
-
-WorkingDirectory=$PROJECT_DIR
-
-ExecStart=$SERVER_CMD
-
-Restart=on-failure
-
-RestartSec=2
-
-
-
-[Install]
-
-WantedBy=default.target
-
-EOF
-
+  ensure_pkg
+  ensure_user
+  set_gdm_autologin
+  copy_project "${src}"
+  ensure_kiosk_session
+  harden_lockdown
+  optional_acl_for_ros
+  print_summary
 }
 
-
-
-write_browser_unit() {
-
-  mkdir -p "$SYSTEMD_USER_DIR"
-
-  cat > "$BROWSER_UNIT" <<EOF
-
-[Unit]
-
-Description=Firefox Auto (restart on crash)
-
-Wants=pyserver.service
-
-After=pyserver.service
-
-
-
-[Service]
-
-Type=simple
-
-ExecStart=$WAIT_SCRIPT
-
-Restart=always
-
-RestartSec=2
-
-
-
-[Install]
-
-WantedBy=default.target
-
-EOF
-
-}
-
-
-
-install() {
-
-  log "1) 檢查環境"
-
-  sanity_checks
-
-
-
-  log "2) 產生等待腳本（等伺服器就緒後開 Firefox）"
-
-  write_wait_script
-
-  echo "   - $WAIT_SCRIPT"
-
-
-
-  log "3) 產生 systemd --user 服務檔"
-
-  write_py_unit
-
-  write_browser_unit
-
-  echo "   - $PY_UNIT"
-
-  echo "   - $BROWSER_UNIT"
-
-
-
-  log "4) 註冊 + 啟用 + 立刻啟動（你要的『全部』操作都在這裡）"
-
-  systemctl --user daemon-reload
-
-  systemctl --user enable --now pyserver.service
-
-  systemctl --user enable --now kiosk-browser.service
-
-
-
-  log "完成！常用指令"
-
-  echo "狀態：systemctl --user status pyserver.service kiosk-browser.service"
-
-  echo "日誌：journalctl --user -u pyserver.service -f"
-
-  echo "日誌：journalctl --user -u kiosk-browser.service -f"
-
-}
-
-
-
-uninstall() {
-
-  log "停止並停用"
-
-  systemctl --user disable --now kiosk-browser.service 2>/dev/null || true
-
-  systemctl --user disable --now pyserver.service 2>/dev/null || true
-
-
-
-  log "移除檔案"
-
-  rm -f "$BROWSER_UNIT" "$PY_UNIT" "$WAIT_SCRIPT" || true
-
-
-
-  log "重新載入"
-
-  systemctl --user daemon-reload
-
-
-
-  log "已解除"
-
-}
-
-
-
-case "${1:-}" in
-
-  install) install ;;
-
-  uninstall) uninstall ;;
-
-  *)
-
-    echo "用法：$0 {install|uninstall}"
-
-    exit 2
-
-    ;;
-
-esac
-
+main "$@"

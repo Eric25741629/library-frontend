@@ -157,10 +157,10 @@ def scan_book():
 
     logger.info(f"Found book: {book_info.get('title', 'Unknown')} by {book_info.get('author', 'Unknown')}")
 
-    # 2. 檢查是否在館內（根據 due_date 欄位 AH 的內容）
-    due_date_str = book_info.get('due_date', '').strip()
-    if '在館內' in due_date_str or '仍在館內' in due_date_str:
-        logger.warning(f"Book {book_id} is already in library (due_date: {due_date_str})")
+    # 2. 只解析 AH 欄位的狀態文字（例如："已被外借/2026-02-26"、"仍在館內"），不再使用到期日判斷逾期
+    ah_field = (book_info.get('due_date') or '').strip()
+    if '在館內' in ah_field or '仍在館內' in ah_field:
+        logger.warning(f"Book {book_id} is already in library (AH: {ah_field})")
         return jsonify({
             "success": False,
             "code": "ALREADY_IN_LIBRARY",
@@ -168,67 +168,56 @@ def scan_book():
             "data": {
                 "title": book_info['title'],
                 "author": book_info.get('author', 'Unknown'),
-                "status": due_date_str
+                "status": ah_field
             }
         }), 400
 
     image_url = f"https://picsum.photos/seed/{book_id}/100/150"
 
-    # 3. 以 libwebpac_playwright 查詢到期日與館藏位置
+    # 3. 不再使用爬蟲查詢到期日與館藏位置；僅使用 SIP2 回傳的資訊
     location = None
-    try:
-        from libwebpac_playwright import fetch_due_and_location
-        due_date_str_webpac, location = asyncio.run(fetch_due_and_location(book_id, debug=False))
-        # 如果 webpac 查詢成功，優先使用 webpac 的結果
-        if due_date_str_webpac:
-            due_date_str = due_date_str_webpac
-    except Exception as e:
-        logger.warning(f"webpac due/location probe failed for {book_id}: {e}")
-        # fallback 已經有 SIP2 的 due_date 了
 
-    # 4. 檢查是否逾期（以 YYYY-MM-DD 格式判定；'在架' 視為未逾期）
-    is_overdue = False
-    if isinstance(due_date_str, str):
-        if due_date_str.strip() == '在架':
-            is_overdue = False
+    # 4. 不再阻擋逾期書籍，改由人工櫃台處理罰款與逾期流程
+
+    # 5. 依 AR/AQ 判斷附件狀態
+    # AR 三種典型狀態：
+    #   - 空字串            → 無附件
+    #   - "附件未借出"     → 有設定附件，但目前沒有借附件，本機允許還書
+    #   - 其他非空文字       → 代表附件目前有借出，本機不處理，請至櫃台
+    attachment_ar = (book_info.get('attachment_ar') or '').strip()
+    attachment_desc = book_info.get('attachment_desc')
+    has_attachment_flag = bool(book_info.get('has_attachment'))
+
+    block_for_attachment = False
+    block_reason = None
+
+    if attachment_ar:
+        if attachment_ar == '附件未借出':
+            logger.info(f"Book {book_id} has un-borrowed attachment (AR='附件未借出'); allowed for kiosk.")
         else:
-            try:
-                parsed = datetime.strptime(due_date_str.strip(), '%Y-%m-%d')
-                today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-                is_overdue = parsed < today
-            except Exception:
-                # 若無法解析則視為未知，不封鎖
-                is_overdue = False
+            # 任何非空且非「附件未借出」的 AR，視為有附件需人工處理
+            block_for_attachment = True
+            block_reason = f"AR={attachment_ar}"
+    elif has_attachment_flag:
+        # AR 未提供時，退回舊的 AQ 判斷
+        block_for_attachment = True
+        block_reason = attachment_desc or '該書含附件'
 
-    if is_overdue:
-        return jsonify({
-            "success": False,
-            "code": "OVERDUE",
-            "message": f"書籍「{book_info['title']}」已逾期 ({due_date_str})，請至人工櫃台歸還。",
-            "data": {
-                 "title": book_info['title'],
-                 "due_date": due_date_str,
-                 "patron_name": book_info.get('patron_name', 'Unknown'),
-                 "location": location
-            }
-        }), 400
-
-    # 5. 檢查是否有附件且不接受附件書籍
-    has_attachment = book_info.get('has_attachment', False)
-    if has_attachment and not config.ATTACHMENT_ACCEPTANCE_ENABLED:
-        logger.warning(f"Book {book_id} has attachment but attachment acceptance is disabled")
+    if block_for_attachment and not config.ATTACHMENT_ACCEPTANCE_ENABLED:
+        logger.warning(f"Book {book_id} has attachment that kiosk will not handle ({block_reason})")
         return jsonify({
             "success": False,
             "code": "ATTACHMENT_NOT_ACCEPTED",
-            "message": "暫時無法接受附件書，請洽櫃檯",
+            "message": "本機不處理含附件之書籍，請攜書及附件至人工櫃台辦理。",
             "data": {
                 "title": book_info['title'],
                 "author": book_info.get('author', 'Unknown'),
-                "attachment_desc": book_info.get('attachment_desc')
+                "attachment_desc": attachment_desc,
+                "attachment_ar": attachment_ar
             }
         }), 400
 
-    # 4. 成功回傳，並附上館藏位置與分櫃建議
+    # 4. 成功回傳，並附上館藏位置與分櫃建議（不再對外顯示到期日）
     target_bin = _compute_target_bin(location, book_id)
     return jsonify({
         "success": True,
@@ -238,10 +227,10 @@ def scan_book():
             "title": book_info['title'],
             "author": book_info['author'],
             "image_url": image_url,
-            "due_date": due_date_str,
             "patron_name": book_info.get('patron_name'),
             "has_attachment": book_info.get('has_attachment', False),
             "attachment_desc": book_info.get('attachment_desc'),
+            "attachment_ar": book_info.get('attachment_ar'),
             "location": location,
             "target_bin": target_bin
         }
@@ -250,47 +239,12 @@ def scan_book():
 
 @api_bp.route('/check_due', methods=['POST'])
 def check_due():
-    """使用 libwebpac_playwright 查詢登錄號/條碼的到期日與館藏位置，並回傳是否逾期。"""
-    data = request.json or {}
-    acn = data.get('acn') or data.get('book_id')
-    if not acn:
-        return jsonify({"success": False, "message": "缺少 acn 或 book_id"}), 400
-
-    try:
-        # 延遲 import，避免在無需該功能時加載 heavy 依賴
-        from libwebpac_playwright import fetch_due_and_location
-    except Exception as e:
-        logger.error(f"Failed to import libwebpac_playwright: {e}")
-        return jsonify({"success": False, "message": "伺服器未啟用網頁查詢功能"}), 500
-
-    try:
-        # fetch_due_and_location 是 async，於同步環境使用 asyncio.run
-        due_date, location = asyncio.run(fetch_due_and_location(acn, debug=False))
-    except Exception as e:
-        logger.error(f"fetch_due_and_location failed for {acn}: {e}")
-        return jsonify({"success": False, "message": "查詢失敗，請稍後再試"}), 500
-
-    # 判定逾期：若 due_date 為 YYYY-MM-DD，與今日比較；若為 '在架' 或 None，視為未逾期/未知
-    is_overdue = None
-    normalized_due = due_date
-    if due_date:
-        if isinstance(due_date, str) and due_date == '在架':
-            is_overdue = False
-        else:
-            try:
-                parsed = datetime.strptime(due_date.strip(), '%Y-%m-%d')
-                today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-                is_overdue = parsed < today
-            except Exception:
-                is_overdue = None
-
+    """目前已停用逾期查詢與爬蟲功能，固定回應未啟用。"""
     return jsonify({
-        "success": True,
-        "acn": acn,
-        "due_date": normalized_due,
-        "location": location,
-        "is_overdue": is_overdue
-    })
+        "success": False,
+        "message": "本機目前未啟用逾期查詢功能，請洽櫃台。",
+        "disabled": True
+    }), 503
 
 @api_bp.route('/return', methods=['POST'])
 def return_book():

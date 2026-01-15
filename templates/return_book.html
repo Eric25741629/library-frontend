@@ -594,25 +594,7 @@
                     nextStep('step-confirm');
                 } else {
                     // 處理逾期錯誤
-                    if (result.code === 'OVERDUE') {
-                        // 顯示逾期警告並在 5 秒後跳回首頁
-                        const bookData = result.data || {};
-                        statusText.innerHTML = `
-                            <div style="color: #dc3545; font-weight: bold;">
-                                <i class="fas fa-exclamation-triangle"></i> 禁止還書：書籍已逾期<br>
-                                書名：${bookData.title || ''}<br>
-                                到期日：${bookData.due_date || ''}<br>
-                                借閱者：${bookData.patron_name || ''}<br>
-                                請至人工櫃台歸還
-                            </div>
-                        `;
-                        
-                        setTimeout(() => {
-                            resetFlow(); // 5秒後跳回首頁
-                        }, 5000);
-                        // 注意：這裡是逾期流程，不解鎖 isScanning，等待頁面跳轉
-                        return;
-                    }
+                    // 目前已不再檢查或顯示逾期狀態
 
                     // 若是書籍條碼錯誤，改用彈窗顯示並保持 5 秒，再回到首頁
                     const msg = result.message || '書籍條碼錯誤';
@@ -754,7 +736,6 @@
                     <span class="book-index">${index + 1}.</span>
                     <span class="book-name">${book.title}</span>
                     <span class="book-author">${book.author}</span>
-                    ${book.due_date ? `<div class="book-due" style="font-size:1rem; color:#c0392b; margin-top:6px; font-weight:600;">到期日：${book.due_date}</div>` : ''}
                 `;
                 list.appendChild(li);
             });

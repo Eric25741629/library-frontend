@@ -114,7 +114,8 @@ class SIP2Client:
             self.logger.info(f"Received item info response for {barcode}")
             
             # Simple parsing logic (SIP2 is positional + variable fields)
-            # We need to extract Title (AJ), Author (AA), Due Date (AH), Patron Name (AE)
+            # We need to extract Title (AJ), Author (AA), Due Date (AH), Patron Name (AE),
+            # 以及附件相關欄位（AQ / AR）。
             data = {
                 "barcode": barcode,
                 "title": "Unknown Title",
@@ -124,6 +125,7 @@ class SIP2Client:
                 "patron_name": None,
                 "has_attachment": False,  # Default to False
                 "attachment_desc": None,
+                "attachment_ar": None,    # SIP2 AR 欄位原始內容（例如：附件未借出、1張光碟片）
                 "error": False,
                 "error_message": None,
             }
@@ -190,6 +192,12 @@ class SIP2Client:
                             else:
                                 data['ag'] = msg
                             self.logger.debug(f"Found AF/AG non-error field ({part[:2]}): {msg}")
+                elif part.startswith('AR'):
+                    # AR 欄位：附件借閱狀態，例如："附件未借出"、"1張光碟片"
+                    ar_val = part[2:].strip()
+                    if ar_val:
+                        data['attachment_ar'] = ar_val
+                        self.logger.debug(f"Found attachment status (AR): {ar_val}")
                 elif part.startswith('AQ'):
                     # AQ 欄位：附件說明，例如「1張光碟片」
                     attach = part[2:].strip()

@@ -1,8 +1,8 @@
 admin_password: admin
 barcode_login_enabled: true
-book_check_enabled: false
+book_check_enabled: true
 library:
-  attachment_acceptance_enabled: false
+  attachment_acceptance_enabled: true
   checkin_enabled: true
   current_location: LB
   host: 140.125.246.11

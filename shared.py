@@ -28,7 +28,7 @@ LOG_DIR.mkdir(exist_ok=True)
 # 介面版本：修改前後端行為時請同步更新，供後台顯示
 # 介面版本：修改前後端行為時請同步更新，供後台顯示
 # 目前為 Beta 釋出，標註可能仍有 bug
-APP_VERSION = "v0.86.2beta"
+APP_VERSION = "0.9.0 beta"
 
 cfg = {}
 MAX_RETURN_LIMIT = 20
@@ -43,7 +43,36 @@ sip2 = None
 
 # --- Logger 設定 ---
 def make_timed_handler(name, backup_days=30):
-    h = TimedRotatingFileHandler(LOG_DIR / f'{name}.log', when='midnight', backupCount=backup_days, encoding='utf-8')
+    """建立分資料夾的 TimedRotatingFileHandler：
+    logs/
+      app/app.log (最新)
+      app/history/app.log.2026-01-14 (舊檔)
+    """
+    # 建立子資料夾與 history 子資料夾
+    sub_dir = LOG_DIR / name
+    history_dir = sub_dir / 'history'
+    sub_dir.mkdir(exist_ok=True)
+    history_dir.mkdir(exist_ok=True)
+
+    base_file = sub_dir / f'{name}.log'
+    h = TimedRotatingFileHandler(base_file, when='midnight', backupCount=backup_days, encoding='utf-8')
+
+    # 自訂 rotator：將輪轉出的檔案移到 history 子資料夾
+    def _rotator(source, dest):
+        try:
+            src_path = Path(source)
+            dst_path = history_dir / src_path.name
+            src_path.replace(dst_path)
+        except Exception:
+            # 若移動失敗，至少維持預設行為
+            try:
+                Path(source).replace(dest)
+            except Exception:
+                pass
+
+    h.rotator = _rotator
+
+    # 格式：時間在前，方便用工具逆向排序時最新在上
     h.setFormatter(logging.Formatter('%(asctime)s %(levelname)s %(name)s: %(message)s'))
     return h
 
