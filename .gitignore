@@ -3,3 +3,5 @@ __pycache__/
 *.db
 logs/
 .vscode/
+test_config.py
+test_sip2_connection.py
