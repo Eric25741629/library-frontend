@@ -23,19 +23,23 @@ BOX_DB_FILE = 'return_box.db'
 BASE_DIR = Path(__file__).resolve().parent
 LOG_DIR = BASE_DIR / 'logs'
 LOG_DIR.mkdir(exist_ok=True)
+LOCALES_DIR = BASE_DIR / 'locales'
 
 # 全域變數 (將在 init_shared 中初始化)
 # 介面版本：修改前後端行為時請同步更新，供後台顯示
 # 介面版本：修改前後端行為時請同步更新，供後台顯示
-# 目前為 Beta 釋出，標註可能仍有 bug
-APP_VERSION = "0.9.0 beta"
+# 目前釋出版本
+APP_VERSION = "0.9.1"
 
 cfg = {}
 MAX_RETURN_LIMIT = 20
 BOOK_CHECK_ENABLED = True
+ADMIN_USERNAME = "admin"
 ADMIN_PASSWORD = "admin"
 BARCODE_LOGIN_ENABLED = True
 REQUIRE_ADMIN_LOGIN = False
+DEFAULT_LANG = 'zh-TW'
+LOCALES = {}
 
 # 全域物件
 machine = None
@@ -109,7 +113,8 @@ def init_box_db():
                   book_id TEXT,
                   title TEXT,
                   image_url TEXT,
-                  return_time TEXT)''')
+                  return_time TEXT,
+                  target_bin INTEGER)''')
     
     # 建立 box_history 如果不存在 (用於歸檔)
     c.execute('''CREATE TABLE IF NOT EXISTS box_history
@@ -118,7 +123,35 @@ def init_box_db():
                   title TEXT,
                   image_url TEXT,
                   return_time TEXT,
-                  clear_time TEXT)''')
+                  clear_time TEXT,
+                  target_bin INTEGER)''')
+    # Migration: add target_bin if missing (old DB)
+    try:
+        cols = [row[1] for row in c.execute("PRAGMA table_info('box_inventory')").fetchall()]
+        if 'target_bin' not in cols:
+            c.execute('ALTER TABLE box_inventory ADD COLUMN target_bin INTEGER')
+        cols_h = [row[1] for row in c.execute("PRAGMA table_info('box_history')").fetchall()]
+        if 'target_bin' not in cols_h:
+            c.execute('ALTER TABLE box_history ADD COLUMN target_bin INTEGER')
+        # Backfill target_bin for legacy rows based on book_id prefix
+        c.execute("""
+            UPDATE box_inventory
+            SET target_bin = CASE
+                WHEN target_bin IS NULL AND upper(substr(book_id,1,1)) IN ('C','G') THEN 1
+                WHEN target_bin IS NULL THEN 2
+                ELSE target_bin
+            END
+        """)
+        c.execute("""
+            UPDATE box_history
+            SET target_bin = CASE
+                WHEN target_bin IS NULL AND upper(substr(book_id,1,1)) IN ('C','G') THEN 1
+                WHEN target_bin IS NULL THEN 2
+                ELSE target_bin
+            END
+        """)
+    except Exception as e:
+        logger.warning(f"DB migration for target_bin failed: {e}")
                   
     conn.commit()
     conn.close()
@@ -131,16 +164,35 @@ def get_box_db():
 def is_box_full():
     conn = get_box_db()
     try:
-        count = conn.execute('SELECT COUNT(*) FROM box_inventory').fetchone()[0]
-    except:
-        count = 0
+        rows = conn.execute('SELECT target_bin, COUNT(*) FROM box_inventory GROUP BY target_bin').fetchall()
+        counts = {int(r[0]): r[1] for r in rows if r[0] is not None}
+        bin1 = counts.get(1, 0)
+        bin2 = counts.get(2, 0)
+    except Exception:
+        bin1 = 0
+        bin2 = 0
     finally:
         conn.close()
-    return count >= MAX_RETURN_LIMIT
+    return bin1 >= MAX_RETURN_LIMIT or bin2 >= MAX_RETURN_LIMIT
+
+def get_bin_counts():
+    """取得箱內分櫃數量"""
+    conn = get_box_db()
+    try:
+        rows = conn.execute('SELECT target_bin, COUNT(*) FROM box_inventory GROUP BY target_bin').fetchall()
+        counts = {int(r[0]): r[1] for r in rows if r[0] is not None}
+        return {
+            "1": counts.get(1, 0),
+            "2": counts.get(2, 0)
+        }
+    except Exception:
+        return {"1": 0, "2": 0}
+    finally:
+        conn.close()
 
 # --- 初始化函式 ---
 def load_config():
-    global cfg, MAX_RETURN_LIMIT, BOOK_CHECK_ENABLED, ADMIN_PASSWORD, BARCODE_LOGIN_ENABLED, REQUIRE_ADMIN_LOGIN
+    global cfg, MAX_RETURN_LIMIT, BOOK_CHECK_ENABLED, ADMIN_USERNAME, ADMIN_PASSWORD, BARCODE_LOGIN_ENABLED, REQUIRE_ADMIN_LOGIN, DEFAULT_LANG
     if CONFIG_FILE.exists():
         try:
             cfg = yaml.safe_load(CONFIG_FILE.read_text(encoding='utf-8')) or {}
@@ -150,9 +202,26 @@ def load_config():
     
     MAX_RETURN_LIMIT = int(cfg.get('max_return_limit', 20))
     BOOK_CHECK_ENABLED = cfg.get('book_check_enabled', True)
+    ADMIN_USERNAME = cfg.get('admin_username', "admin")
     ADMIN_PASSWORD = cfg.get('admin_password', "admin")
     BARCODE_LOGIN_ENABLED = cfg.get('barcode_login_enabled', True)
     REQUIRE_ADMIN_LOGIN = cfg.get('require_admin_login', False)
+    DEFAULT_LANG = cfg.get('default_lang', 'zh-TW')
+
+def load_locales():
+    global LOCALES
+    LOCALES = {}
+    try:
+        if not LOCALES_DIR.exists():
+            return
+        for file in LOCALES_DIR.glob('*.json'):
+            try:
+                data = json.loads(file.read_text(encoding='utf-8'))
+                LOCALES[file.stem] = data if isinstance(data, dict) else {}
+            except Exception as e:
+                logger.warning(f"Failed to load locale {file.name}: {e}")
+    except Exception as e:
+        logger.warning(f"Failed to load locales: {e}")
 
 def init_machine_controller():
     global machine
@@ -245,6 +314,7 @@ def start_background_tasks():
 # --- 主初始化入口 ---
 def init_shared():
     load_config()
+    load_locales()
     setup_logging()
     init_machine_controller()
     init_sip2_client()

@@ -11,7 +11,8 @@ if cfg_file.exists():
         _cfg = {}
 
 # 預設值與對外變數 (向後相容)
-VERSION = "0.75"
+VERSION = "0.9.1"
+ADMIN_USERNAME = _cfg.get('admin_username', 'admin')
 ADMIN_PASSWORD = _cfg.get('admin_password', 'admin')
 BARCODE_LOGIN_ENABLED = bool(_cfg.get('barcode_login_enabled', True))
 REQUIRE_ADMIN_LOGIN = bool(_cfg.get('require_admin_login', False))
@@ -37,7 +38,7 @@ ATTACHMENT_ACCEPTANCE_ENABLED = bool(LIBRARY_CONFIG.get('attachment_acceptance_e
 
 # 重新載入函式（如需在執行時重讀設定）
 def reload_config():
-    global _cfg, ADMIN_PASSWORD, BARCODE_LOGIN_ENABLED, REQUIRE_ADMIN_LOGIN, MAX_RETURN_LIMIT
+    global _cfg, ADMIN_USERNAME, ADMIN_PASSWORD, BARCODE_LOGIN_ENABLED, REQUIRE_ADMIN_LOGIN, MAX_RETURN_LIMIT
     global MACHINE_CONFIG, MACHINE_PORT, MACHINE_BAUDRATE, LOG_BACKUP_DAYS
     global LIBRARY_CONFIG, LIBRARY_MOCK_ENABLED, LIBRARY_HOST, LIBRARY_PORT, LIBRARY_LOGIN_ENABLED, LIBRARY_USER, LIBRARY_PASS, LIBRARY_INSTITUTION, LIBRARY_CURRENT_LOCATION, ATTACHMENT_ACCEPTANCE_ENABLED
     
@@ -46,6 +47,7 @@ def reload_config():
             _cfg = yaml.safe_load(cfg_file.read_text(encoding='utf-8')) or {}
         except Exception:
             _cfg = {}
+    ADMIN_USERNAME = _cfg.get('admin_username', 'admin')
     ADMIN_PASSWORD = _cfg.get('admin_password', 'admin')
     BARCODE_LOGIN_ENABLED = bool(_cfg.get('barcode_login_enabled', True))
     REQUIRE_ADMIN_LOGIN = bool(_cfg.get('require_admin_login', False))
