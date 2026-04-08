@@ -232,6 +232,9 @@ body {
     box-shadow: 0 4px 10px rgba(0,0,0,0.03);
     font-family: monospace;
     letter-spacing: 2px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .barcode-input-field:focus {
@@ -463,6 +466,40 @@ button:active {
     display: flex;
     align-items: center;
     gap: 15px;
+}
+
+.language-switch {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-left: 12px;
+}
+
+.floating-lang-switch {
+    position: fixed;
+    right: 24px;
+    bottom: 86px;
+    display: flex;
+    gap: 8px;
+    z-index: 1001;
+}
+
+.lang-btn {
+    padding: 6px 12px;
+    border-radius: 10px;
+    border: 1px solid rgba(0,0,0,0.12);
+    background: rgba(255,255,255,0.92);
+    color: var(--text-light);
+    text-decoration: none;
+    font-size: 0.9rem;
+    font-weight: 600;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+}
+
+.lang-btn.active {
+    color: var(--primary-blue);
+    border-color: rgba(0,123,255,0.35);
+    background: rgba(0,123,255,0.12);
 }
 
 /* 修正系統狀態文字與圓點的對齊 */
@@ -731,4 +768,67 @@ button:active {
 .place-book-anim-container {
     height: auto !important; /* 覆蓋原有固定高度 */
     min-height: 220px;
+}
+
+.scan-guide-badge {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    background: rgba(0, 0, 0, 0.55);
+    color: #fff;
+    font-size: 0.85rem;
+    padding: 4px 8px;
+    border-radius: 8px;
+    letter-spacing: 0.5px;
+}
+
+/* 使用者上傳的放書示意圖：放大顯示但維持等比例，且自動貼合內容高度 */
+.place-book-guide-image {
+    width: 100%;
+    max-width: 860px; /* 放寬最大寬度，能撐多大就撐多大 */
+    max-height: 65vh; /* 避免圖片過高把按鈕擠出畫面 */
+    height: auto;
+    object-fit: contain;
+    display: block;
+    margin: 0 auto;
+}
+
+/* 還書放入步驟：若有自訂示意圖，移除多餘邊距，讓卡片完全包覆圖片 */
+#step-place-book {
+    justify-content: center;
+}
+
+#step-place-book .place-book-instruction.has-guide-image {
+    padding: 0; /* 移除內部預設的大量留白 */
+    background: transparent;
+    box-shadow: none;
+}
+
+#step-place-book .place-book-instruction.has-guide-image .place-book-anim-container {
+    width: 100%;
+    height: auto;
+    min-height: auto; /* 移除強制最小高度，讓它自動貼合圖片 */
+    margin: 0;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    background: white;
+    border-radius: var(--border-radius);
+    box-shadow: var(--card-shadow);
+    padding: 1.5rem; /* 使用者圖片周圍的微小留白 */
+    overflow: hidden;
+}
+
+#step-place-book .place-book-instruction.has-guide-image .place-book-anim-container .place-book-guide-image {
+    width: 100%;
+    max-width: 100%;
+    height: auto;
+    max-height: 65vh; /* 防止圖片拉太高擠壓到按鈕 */
+    margin: 0;
+    object-fit: contain;
+    object-position: center;
+}
+
+#step-place-book .action-buttons {
+    margin-top: 1.5rem;
 }

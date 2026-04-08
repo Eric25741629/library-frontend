@@ -25,7 +25,7 @@ def check_login():
 def get_logs():
     """獲取還書箱內的書籍清單（box_inventory）與今日統計數據"""
     conn = shared.get_box_db()
-    data = {"logs": [], "history_logs": [], "today_total": 0}
+    data = {"logs": [], "history_logs": [], "today_total": 0, "bin_counts": shared.get_bin_counts()}
     
     try:
         logs = conn.execute('SELECT * FROM box_inventory ORDER BY id DESC').fetchall()
@@ -63,11 +63,12 @@ def clear_logs():
                       title TEXT,
                       image_url TEXT,
                       return_time TEXT,
-                      clear_time TEXT)''')
+                      clear_time TEXT,
+                      target_bin INTEGER)''')
                       
         current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        conn.execute('''INSERT INTO box_history (book_id, title, image_url, return_time, clear_time)
-                        SELECT book_id, title, image_url, return_time, ? FROM box_inventory''', (current_time,))
+        conn.execute('''INSERT INTO box_history (book_id, title, image_url, return_time, clear_time, target_bin)
+                SELECT book_id, title, image_url, return_time, ?, target_bin FROM box_inventory''', (current_time,))
         
         conn.execute('DELETE FROM box_inventory')
         conn.commit()
@@ -89,11 +90,12 @@ def clear_box():
                       title TEXT,
                       image_url TEXT,
                       return_time TEXT,
-                      clear_time TEXT)''')
+                      clear_time TEXT,
+                      target_bin INTEGER)''')
                       
         current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        conn.execute('''INSERT INTO box_history (book_id, title, image_url, return_time, clear_time)
-                        SELECT book_id, title, image_url, return_time, ? FROM box_inventory''', (current_time,))
+        conn.execute('''INSERT INTO box_history (book_id, title, image_url, return_time, clear_time, target_bin)
+                SELECT book_id, title, image_url, return_time, ?, target_bin FROM box_inventory''', (current_time,))
         
         conn.execute('DELETE FROM box_inventory')
         conn.commit()
@@ -115,7 +117,8 @@ def clear_history():
                       title TEXT,
                       image_url TEXT,
                       return_time TEXT,
-                      clear_time TEXT)''')
+                      clear_time TEXT,
+                      target_bin INTEGER)''')
         conn.execute('DELETE FROM box_history')
         conn.commit()
     except Exception as e:
@@ -132,6 +135,56 @@ def get_machine_params():
         "limit": shared.MAX_RETURN_LIMIT,
         "book_check_enabled": shared.BOOK_CHECK_ENABLED
     })
+
+@admin_api_bp.route('/get_admin_auth', methods=['GET'])
+def get_admin_auth():
+    return jsonify({
+        "success": True,
+        "require_admin_login": bool(getattr(shared, 'REQUIRE_ADMIN_LOGIN', False)),
+        "admin_username": getattr(shared, 'ADMIN_USERNAME', 'admin')
+    })
+
+@admin_api_bp.route('/set_admin_auth', methods=['POST'])
+def set_admin_auth():
+    """設定後台登入保護（是否啟用、帳號、密碼）"""
+    data = request.json or {}
+    require_login = bool(data.get('require_admin_login', False))
+    username = (data.get('admin_username') or '').strip()
+    password = data.get('admin_password')
+
+    if not username:
+        return jsonify({"success": False, "message": "管理員帳號不可為空"}), 400
+
+    # 密碼可留空，表示不變更
+    update_password = password is not None and str(password) != ''
+
+    try:
+        current_conf = {}
+        if shared.CONFIG_FILE.exists():
+            current_conf = yaml.safe_load(shared.CONFIG_FILE.read_text(encoding='utf-8')) or {}
+
+        current_conf['require_admin_login'] = require_login
+        current_conf['admin_username'] = username
+        if update_password:
+            current_conf['admin_password'] = str(password)
+
+        shared.CONFIG_FILE.write_text(yaml.dump(current_conf, allow_unicode=True), encoding='utf-8')
+
+        global_config.reload_config()
+        shared.REQUIRE_ADMIN_LOGIN = require_login
+        shared.ADMIN_USERNAME = username
+        if update_password:
+            shared.ADMIN_PASSWORD = str(password)
+
+        return jsonify({
+            "success": True,
+            "message": "後台登入設定已更新",
+            "require_admin_login": shared.REQUIRE_ADMIN_LOGIN,
+            "admin_username": shared.ADMIN_USERNAME
+        })
+    except Exception as e:
+        logger.error(f"set_admin_auth error: {e}")
+        return jsonify({"success": False, "message": "儲存後台登入設定失敗"}), 500
 
 @admin_api_bp.route('/set_machine_params', methods=['POST'])
 def set_machine_params():
@@ -442,9 +495,9 @@ def upload_front_images():
             if not file or not file.filename:
                 return None
 
-            # 只允許基本安全的副檔名
+            # 只允許基本安全的副檔名（加入 .svg 支援）
             suffix = Path(file.filename).suffix.lower()
-            if suffix not in {'.png', '.jpg', '.jpeg', '.gif'}:
+            if suffix not in {'.png', '.jpg', '.jpeg', '.gif', '.svg'}:
                 raise ValueError(f"不支援的檔案格式: {suffix}")
 
             safe_name = f"{default_basename}{suffix}"

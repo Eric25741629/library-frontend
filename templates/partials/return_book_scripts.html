@@ -201,13 +201,21 @@
                 if (result.success) {
                     scannedBooks.push(result.data);
                     updateBookList();
-                    // 檢查是否有附件
-                    if (result.data.has_attachment) {
-                        currentProcessingBook = result.data;
-                        nextStep('step-attachment-prompt');
-                    } else {
-                        nextStep('step-confirm');
+                    // 判斷是否為「附件已借出」：才進入附件流程
+                    const hasBorrowedAttachment = (result.data && typeof result.data.attachment_borrowed === 'boolean')
+                        ? result.data.attachment_borrowed
+                        : !!result.data.has_attachment;
+                    // 目前暫不受理含附件（已借出）的書籍：直接提示並重置
+                    if (hasBorrowedAttachment) {
+                        showTempMessage('本機暫不處理含附件之書籍，請至櫃台辦理。', 3);
+                        document.getElementById('main-scan-box').classList.remove('active');
+                        setTimeout(() => {
+                            resetFlow();
+                        }, 5000);
+                        return;
                     }
+                    currentProcessingBook = null;
+                    nextStep('step-confirm');
                 } else {
                     // 處理不接受附件的錯誤
                     if (result.code === 'ATTACHMENT_NOT_ACCEPTED') {

@@ -1,6 +1,10 @@
 admin_password: admin
+admin_username: admin
 barcode_login_enabled: true
 book_check_enabled: true
+front_images:
+  place_book_guide: uploads/place_book_guide.svg
+  scan_guide: uploads/scan_guide.jpg
 library:
   attachment_acceptance_enabled: true
   checkin_enabled: true
@@ -18,4 +22,4 @@ machine:
   baudrate: 9600
   port: /dev/uno
 max_return_limit: 20
-require_admin_login: false
+require_admin_login: true

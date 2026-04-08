@@ -36,6 +36,7 @@ def get_status():
     """檢查系統狀態（包含圖書館與機器通訊）"""
     suspended = shared.is_box_full()
     limit = shared.MAX_RETURN_LIMIT
+    bin_counts = shared.get_bin_counts()
 
     # 檢查圖書館通訊
     # 改用 SIP2 99 SC Status 健康檢查，而不是一直送 17 Item Information
@@ -117,6 +118,7 @@ def get_status():
     return jsonify({
         "suspended": suspended,
         "limit": limit,
+        "bin_counts": bin_counts,
         "library_ok": library_ok,
         "machine_ok": machine_ok,
         "machine_state": machine_state,
@@ -188,18 +190,26 @@ def scan_book():
     attachment_desc = book_info.get('attachment_desc')
     has_attachment_flag = bool(book_info.get('has_attachment'))
 
+    # attachment_configured: 系統判定「有附件設定」
+    # attachment_borrowed: 目前附件為「已借出」
+    attachment_configured = False
+    attachment_borrowed = False
+
     block_for_attachment = False
     block_reason = None
 
     if attachment_ar:
+        attachment_configured = True
         if attachment_ar == '附件未借出':
             logger.info(f"Book {book_id} has un-borrowed attachment (AR='附件未借出'); allowed for kiosk.")
         else:
             # 任何非空且非「附件未借出」的 AR，視為有附件需人工處理
             block_for_attachment = True
             block_reason = f"AR={attachment_ar}"
+            attachment_borrowed = True
     elif has_attachment_flag:
         # AR 未提供時，退回舊的 AQ 判斷
+        attachment_configured = True
         block_for_attachment = True
         block_reason = attachment_desc or '該書含附件'
 
@@ -228,7 +238,8 @@ def scan_book():
             "author": book_info['author'],
             "image_url": image_url,
             "patron_name": book_info.get('patron_name'),
-            "has_attachment": book_info.get('has_attachment', False),
+            "has_attachment": attachment_configured,
+            "attachment_borrowed": attachment_borrowed,
             "attachment_desc": book_info.get('attachment_desc'),
             "attachment_ar": book_info.get('attachment_ar'),
             "location": location,
@@ -273,10 +284,34 @@ def return_book():
             return jsonify({"success": False, "message": "附件條碼與書籍不符，請重新掃描"}), 400
 
     returned_books = []
+    overdue_messages = []  # 蒐集還書成功但包含 AF/AG 訊息（例如逾期說明）
     # 選擇分櫃（預設 1；若有提供 target_bin 則使用）
     selected_bin = None
     current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     machine = shared.machine
+
+    # 先嘗試由前端資料或條碼推算分櫃，以便做滿箱檢查
+    try:
+        if books_payload and isinstance(books_payload, list):
+            first = books_payload[0] if books_payload else None
+            if isinstance(first, dict):
+                b_id = first.get('book_id')
+                location = first.get('location')
+                selected_bin = int(first.get('target_bin') or _compute_target_bin(location, b_id))
+        if selected_bin is None and book_ids:
+            selected_bin = int(_compute_target_bin(None, book_ids[0]))
+    except Exception:
+        selected_bin = None
+
+    if selected_bin is not None:
+        bin_counts = shared.get_bin_counts()
+        if bin_counts.get(str(selected_bin), 0) >= shared.MAX_RETURN_LIMIT:
+            return jsonify({
+                "success": False,
+                "message": f"分類箱{selected_bin}已滿，暫停服務",
+                "code": "BIN_FULL",
+                "data": {"target_bin": selected_bin}
+            }), 503
     
     # 硬體還書流程控制
     try:
@@ -353,7 +388,7 @@ def return_book():
                 first = books_payload[0]
                 b_id = first.get('book_id')
                 location = first.get('location')
-                selected_bin = int(first.get('target_bin') or _compute_target_bin(location))
+                selected_bin = int(first.get('target_bin') or _compute_target_bin(location, b_id))
                 book_ids = [b_id]
             except Exception:
                 pass
@@ -381,9 +416,25 @@ def return_book():
                 config.reload_config()  # 重新載入配置
                 if config.LIBRARY_CHECKIN_ENABLED and shared.sip2:
                     logger.info(f"Executing real checkin for book: {b_id}")
-                    checkin_success = shared.sip2.checkin_book(b_id)
+                    checkin_result = shared.sip2.checkin_book(b_id)
+
+                    # 新版 checkin_book 會回傳 dict，內含 success 與 AF/AG 訊息；
+                    # 若為舊版 bool 也能相容處理。
+                    af_msg = None
+                    ag_msg = None
+                    if isinstance(checkin_result, dict):
+                        checkin_success = bool(checkin_result.get('success'))
+                        af_msg = checkin_result.get('af_message')
+                        ag_msg = checkin_result.get('ag_message')
+                    else:
+                        checkin_success = bool(checkin_result)
+
                     if checkin_success:
                         logger.info(f"Real checkin successful for book: {b_id}")
+                        # 09/10 成功但 AF/AG 內若有逾期訊息，僅做提示，不阻擋還書
+                        overdue_text = af_msg or ag_msg
+                        if overdue_text:
+                            overdue_messages.append(overdue_text)
                     else:
                         logger.warning(f"Real checkin failed for book: {b_id}")
                         all_checkin_success = False
@@ -422,13 +473,22 @@ def return_book():
                 # 前端若已提供 image_url 則沿用，否則使用預設隨機圖
                 image_url = book_source.get('image_url') or f"https://picsum.photos/seed/{b_id}/100/150"
 
-                cursor.execute('INSERT INTO box_inventory (book_id, title, image_url, return_time) VALUES (?, ?, ?, ?)',
-                               (b_id, title, image_url, current_time))
+                # 分櫃資訊
+                location = book_source.get('location')
+                target_bin = None
+                try:
+                    target_bin = int(book_source.get('target_bin') or selected_bin or _compute_target_bin(location, b_id))
+                except Exception:
+                    target_bin = selected_bin or _compute_target_bin(location, b_id)
+
+                cursor.execute('INSERT INTO box_inventory (book_id, title, image_url, return_time, target_bin) VALUES (?, ?, ?, ?, ?)',
+                               (b_id, title, image_url, current_time, target_bin))
 
                 returned_books.append({
                     "book_id": b_id,
                     "title": title,
-                    "return_time": current_time
+                    "return_time": current_time,
+                    "target_bin": target_bin
                 })
         # 若有任何一本書還書指令失敗，則：
         # 1) 回滾本次交易，不記錄到本地 box_inventory
@@ -490,7 +550,9 @@ def return_book():
     return jsonify({
         "success": True,
         "message": f"成功歸還 {len(returned_books)} 本書籍",
-        "data": returned_books
+        "data": returned_books,
+        # 若有 AF/AG 逾期說明，傳回前端顯示提示（不影響還書成功與否）
+        "overdue_message": overdue_messages[-1] if overdue_messages else None
     })
 
 @api_bp.route('/cancel', methods=['POST'])

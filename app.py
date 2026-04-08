@@ -1,4 +1,4 @@
-from flask import Flask
+from flask import Flask, session
 from datetime import timedelta
 import logging
 
@@ -20,6 +20,25 @@ app.register_blueprint(views_bp)
 app.register_blueprint(api_bp, url_prefix='/api')
 app.register_blueprint(admin_api_bp, url_prefix='/api/admin')
 app.register_blueprint(hardware_api_bp, url_prefix='/api/hardware')
+
+# i18n helpers
+def _get_lang():
+    lang = session.get('lang') or shared.DEFAULT_LANG or 'zh-TW'
+    if lang not in shared.LOCALES:
+        lang = 'zh-TW' if 'zh-TW' in shared.LOCALES else (next(iter(shared.LOCALES), 'zh-TW'))
+    return lang
+
+@app.context_processor
+def inject_i18n():
+    lang = _get_lang()
+
+    def t(key, default=None):
+        return shared.LOCALES.get(lang, {}).get(key, default if default is not None else key)
+
+    return {
+        't': t,
+        'current_lang': lang
+    }
 
 # 啟動背景任務
 shared.start_background_tasks()

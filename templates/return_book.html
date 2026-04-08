@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>國立雲林科技大學圖書館 - 自助還書系統</title>
+    <title>{{ t('title.return', '國立雲林科技大學圖書館 - 自助還書系統') }}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
     <!-- 引入 Font Awesome -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
@@ -34,7 +34,7 @@
             <span class="time" id="current-time">18:43 | 2025年5月24日</span>
         </div>
         <div class="header-center">
-            <h1>國立雲林科技大學圖書館</h1>
+            <h1>{{ t('header.library', '國立雲林科技大學圖書館') }}</h1>
         </div>
         <div class="header-right">
             <img src="{{ url_for('static', filename='logo.png') }}" alt="YunTech Logo" style="height: 80px;">
@@ -47,11 +47,11 @@
         <!-- Step 1: Welcome Screen -->
         <section id="step-welcome" class="step-section active">
             <div class="welcome-content">
-                <h2 class="welcome-title">智慧還書，流暢體驗</h2>
-                <p class="welcome-subtitle">歡迎使用國立雲林科技大學圖書館自助還書服務</p>
+                <h2 class="welcome-title">{{ t('welcome.title', '智慧還書，流暢體驗') }}</h2>
+                <p class="welcome-subtitle">{{ t('welcome.subtitle', '歡迎使用國立雲林科技大學圖書館自助還書服務') }}</p>
                 <div class="action-buttons">
                     <button class="btn-primary btn-large" onclick="startReturnProcess()">
-                        <i class="fas fa-book-reader"></i> 開始還書
+                        <i class="fas fa-book-reader"></i> {{ t('button.start_return', '開始還書') }}
                     </button>
                 </div>
             </div>
@@ -59,33 +59,34 @@
 
         <!-- Step 2: Scan Screen -->
         <section id="step-scan" class="step-section">
-            <h2 class="section-title">請將書本條碼放入掃描區</h2>
+            <h2 class="section-title">{{ t('scan.title', '請將書本條碼放入掃描區') }}</h2>
             
             <div class="scan-area-container">
                 <div class="scan-box" id="main-scan-box">
                     {% if scan_guide_image %}
                         <img src="{{ url_for('static', filename=scan_guide_image) }}" alt="掃描示意圖" style="max-width:100%; max-height:100%; object-fit:contain;">
+                        <span class="scan-guide-badge">{{ t('scan.guide_label', '示意圖') }}</span>
                     {% else %}
                         <i class="fas fa-barcode" style="font-size: 8rem; color: #d1d9e6;"></i>
                     {% endif %}
                 </div>
             </div>
             
-            <p class="scan-status" id="scan-status-text">系統就緒，請掃描書籍條碼</p>
+            <p class="scan-status" id="scan-status-text">{{ t('scan.ready', '系統就緒，請掃描書籍條碼') }}</p>
 
             <!-- 真實掃描輸入框：使用 readonly 以避免虛擬鍵盤彈出，透過全域 keydown 監聽掃描輸入 -->
-            <input type="text" id="barcode-input" class="barcode-input-field" placeholder="請使用掃描器或實體鍵盤掃描" autocomplete="off" inputmode="none" tabindex="-1" readonly>
+            <input type="text" id="barcode-input" class="barcode-input-field" placeholder="{{ t('scan.placeholder', '請使用掃描器或實體鍵盤掃描') }}" autocomplete="off" inputmode="none" tabindex="-1" readonly>
 
             <div class="action-buttons">
                 <button class="btn-danger btn-medium" onclick="resetFlow(this)">
-                    <i class="fas fa-times"></i> 取消還書
+                    <i class="fas fa-times"></i> {{ t('button.cancel_return', '取消還書') }}
                 </button>
             </div>
         </section>
 
         <!-- Step 3: Confirmation Screen -->
         <section id="step-confirm" class="step-section">
-            <h2 class="section-title">請確認以下還書資訊：</h2>
+            <h2 class="section-title">{{ t('confirm.title', '請確認以下還書資訊：') }}</h2>
             
             <div class="book-list-container">
                 <ul id="scanned-books-list" class="book-list">
@@ -95,10 +96,10 @@
 
             <div class="action-buttons-vertical">
                 <button id="confirm-next-btn" class="btn-primary btn-block" onclick="goToPlaceBookStep(this)">
-                    <i class="fas fa-arrow-right"></i> 下一步：投入還書箱
+                    <i class="fas fa-arrow-right"></i> {{ t('confirm.next_to_place', '下一步：投入還書箱') }}
                 </button>
                 <button class="btn-secondary btn-block" style="margin-top:12px;" onclick="resetFlow(this)">
-                    <i class="fas fa-times"></i> 取消還書
+                    <i class="fas fa-times"></i> {{ t('button.cancel_return', '取消還書') }}
                 </button>
             </div>
         </section>
@@ -133,7 +134,7 @@
                     <i class="fas fa-book"></i> 我沒有借附件，現在還書
                 </button>
                 <button type="button" class="btn-danger btn-large" onclick="resetFlow(this)">
-                    <i class="fas fa-times"></i> 取消還書
+                    <i class="fas fa-times"></i> {{ t('button.cancel_return', '取消還書') }}
                 </button>
             </div>
         </section>
@@ -143,18 +144,18 @@
             <h2 class="section-title">請將書本放入還書機內</h2>
             {% if book_check_enabled %}
             <p style="text-align:center; color:#28a745; font-size:1.1rem; margin-bottom:0.5rem;">
-                <i class="fas fa-check-circle"></i> 本機已啟用書籍檢測，未放書將自動提醒您。
+                <i class="fas fa-check-circle"></i> 本機已啟用書籍檢測，未放書將提醒您。
             </p>
             {% else %}
             <p style="text-align:center; color:#ffc107; font-size:1.1rem; margin-bottom:0.5rem;">
-                <i class="fas fa-bolt"></i> 目前為快速還書模式，系統不檢查是否有放書，請自行確認。
+                <i class="fas fa-bolt"></i> 目前未啟用放入檢查，系統不會確認是否已放書，請自行確認。
             </p>
             {% endif %}
             
-            <div class="place-book-instruction">
+            <div class="place-book-instruction{% if place_book_guide_image %} has-guide-image{% endif %}">
                 <div class="place-book-anim-container">
                     {% if place_book_guide_image %}
-                        <img src="{{ url_for('static', filename=place_book_guide_image) }}" alt="放書示意圖" style="max-width:100%; max-height:260px; object-fit:contain; margin-bottom:1rem;">
+                        <img src="{{ url_for('static', filename=place_book_guide_image) }}" alt="放書示意圖" class="place-book-guide-image">
                     {% else %}
                         <!-- 原本的書背朝向機器 SVG 示意圖 -->
                         <div class="book-spine-guide">
@@ -210,10 +211,6 @@
                         </div>
                     {% endif %}
                 </div>
-                <p style="font-size: 1.3rem; color: #555; margin-bottom: 0.5rem;">請確認書籍已放入</p>
-                <p style="font-size: 1.2rem; color: #c0392b; margin-bottom: 1rem; font-weight: bold;">
-                    請以書背朝向機器的方向投入
-                </p>
             </div>
 
             <div class="action-buttons">
@@ -221,7 +218,7 @@
                     <i class="fas fa-check"></i> 完成投入
                 </button>
                 <button type="button" class="btn-danger btn-large" onclick="openCancelConfirmModal(this)" style="margin-left:12px;">
-                    <i class="fas fa-times"></i> 取消還書
+                    <i class="fas fa-times"></i> {{ t('button.cancel_return', '取消還書') }}
                 </button>
             </div>
         </section>
@@ -292,14 +289,14 @@
     <!-- 取消還書確認彈窗 -->
     <div id="cancel-confirm-modal" class="suspended-overlay" style="display:none; align-items:center; justify-content:center; z-index:10001;">
         <div class="suspended-content" style="max-width:760px; padding: 2rem; border-radius:12px; text-align:center; background:rgba(255,255,255,0.96); color:var(--text-dark);">
-            <h2 style="color:var(--danger-red); margin-bottom:0.5rem;"><i class="fas fa-exclamation-triangle"></i> 取消還書確認</h2>
-            <p style="font-size:1.1rem; color:#444; margin-bottom:1rem;">請確認您尚未將書籍放入還書箱內部。若書本已放入，取消操作可能造成誤分櫃或遺失。</p>
+            <h2 style="color:var(--danger-red); margin-bottom:0.5rem;"><i class="fas fa-exclamation-triangle"></i> {{ t('modal.cancel_title', '取消還書確認') }}</h2>
+            <p style="font-size:1.1rem; color:#444; margin-bottom:1rem;">{{ t('modal.cancel_desc', '請確認是否要取消還書。若書籍尚未取出，請先返回並確認。') }}</p>
             <div style="display:flex; justify-content:center; gap:12px;">
                 <button class="btn-danger btn-medium" onclick="confirmCancel()" style="min-width:180px;">
-                    <i class="fas fa-lock"></i> 開始關門並返回首頁
+                    <i class="fas fa-check-circle"></i> {{ t('modal.cancel_confirm', '確認取消') }}
                 </button>
                 <button class="btn-secondary btn-medium" onclick="hideCancelModal()" style="min-width:120px;">
-                    <i class="fas fa-times"></i> 我還要檢查
+                    <i class="fas fa-times"></i> {{ t('modal.cancel_back', '返回') }}
                 </button>
             </div>
         </div>
@@ -321,7 +318,7 @@
             &copy; 2025 國立雲林科技大學圖書館 | 版權所有
         </div>
         <div class="footer-right">
-            <a href="/admin" style="color: #999; text-decoration: none; margin-right: 15px; font-size: 0.8rem;"><i class="fas fa-cog"></i> 管理後台</a>
+            <a href="/admin" style="color: #999; text-decoration: none; margin-right: 15px; font-size: 0.8rem;"><i class="fas fa-cog"></i> {{ t('footer.admin', '管理後台') }}</a>
             <span class="system-status" id="system-status">
                 <span id="lib-status" style="margin-right:12px;">
                     <span class="status-dot" id="lib-dot" style="background-color:#ffcc00"></span>
@@ -335,7 +332,17 @@
         </div>
     </footer>
 
+    <div class="floating-lang-switch">
+        <a class="lang-btn {% if current_lang == 'zh-TW' %}active{% endif %}" href="/set-lang/zh-TW">{{ t('lang.zh', '中文') }}</a>
+        <a class="lang-btn {% if current_lang == 'en' %}active{% endif %}" href="/set-lang/en">{{ t('lang.en', 'English') }}</a>
+    </div>
+
     <script>
+        // i18n strings exposed to client-side JS
+        window.I18N = {
+            confirm_title: "{{ t('confirm.title', '請確認以下還書資訊：') }}",
+            confirm_next: "{{ t('confirm.next_to_place', '下一步：投入還書箱') }}"
+        };
         let scannedBooks = [];
         let isScanning = false; // 掃描鎖定旗標，防止快速重複輸入
         let currentProcessingBook = null; // 當前正在處理含附件的書籍
@@ -401,10 +408,15 @@
                 }
                 const modal = document.getElementById('temp-message-modal');
                 const body = document.getElementById('temp-message-body');
+                const title = document.getElementById('temp-message-title');
                 if (!modal || !body) {
                     // fallback to alert
                     alert(message);
                     return;
+                }
+                if (title) {
+                    title.innerHTML = '<i class="fas fa-exclamation-circle"></i> 錯誤';
+                    title.style.color = 'var(--danger-red)';
                 }
                 body.textContent = message;
                 modal.style.display = 'flex';
@@ -414,6 +426,46 @@
             } catch (e) {
                 console.error('showTempMessage failed', e);
                 try { alert(message); } catch(err){}
+            }
+        }
+
+        // 顯示逾期 AF 訊息：不影響還書結果，只做提示，可手動點擊關閉，或預設 seconds 秒自動關閉
+        function showOverdueMessage(message, seconds = 10, onClose) {
+            try {
+                const modal = document.getElementById('temp-message-modal');
+                const body = document.getElementById('temp-message-body');
+                const title = document.getElementById('temp-message-title');
+                if (!modal || !body) {
+                    alert(message);
+                    if (typeof onClose === 'function') onClose();
+                    return;
+                }
+
+                if (title) {
+                    title.innerHTML = '<i class="fas fa-exclamation-circle"></i> 逾期提醒';
+                    title.style.color = '#e67e22';
+                }
+                body.textContent = message;
+                modal.style.display = 'flex';
+
+                let closed = false;
+                function doClose() {
+                    if (closed) return;
+                    closed = true;
+                    modal.style.display = 'none';
+                    modal.removeEventListener('click', clickHandler);
+                    if (typeof onClose === 'function') onClose();
+                }
+
+                function clickHandler() {
+                    doClose();
+                }
+
+                modal.addEventListener('click', clickHandler);
+                setTimeout(doClose, (seconds || 10) * 1000);
+            } catch (e) {
+                console.error('showOverdueMessage failed', e);
+                try { alert(message); if (typeof onClose === 'function') onClose(); } catch(err){}
             }
         }
 
@@ -584,15 +636,34 @@
                 if (result.success) {
                     scannedBooks.push(result.data);
                     updateBookList();
-                    // 檢查是否有附件：若有，先記錄，但仍先顯示確認頁
-                    if (result.data.has_attachment) {
-                        currentProcessingBook = result.data;
-                    } else {
-                        currentProcessingBook = null;
+                    // 判斷是否為「附件已借出」：才進入附件流程
+                    const hasBorrowedAttachment = (result.data && typeof result.data.attachment_borrowed === 'boolean')
+                        ? result.data.attachment_borrowed
+                        : !!result.data.has_attachment;
+                    // 目前暫不受理含附件（已借出）的書籍：直接提示並重置
+                    if (hasBorrowedAttachment) {
+                        showTempMessage('本機暫不處理含附件之書籍，請至櫃台辦理。', 3);
+                        document.getElementById('main-scan-box').classList.remove('active');
+                        setTimeout(() => {
+                            resetFlow();
+                        }, 5000);
+                        return;
                     }
+                    currentProcessingBook = null;
                     setConfirmNextButtonLabel();
                     nextStep('step-confirm');
                 } else {
+                    // 不接受含附件的書（附件已借出）
+                    if (result.code === 'ATTACHMENT_NOT_ACCEPTED') {
+                        const msg = result.message || '本機不處理含附件之書籍';
+                        showTempMessage(msg, 3);
+                        document.getElementById('main-scan-box').classList.remove('active');
+                        setTimeout(() => {
+                            resetFlow();
+                        }, 5000);
+                        return;
+                    }
+
                     // 處理逾期錯誤
                     // 目前已不再檢查或顯示逾期狀態
 
@@ -744,11 +815,8 @@
         // 前往投入書籍步驟（會呼叫硬體開門，顯示等待畫面直到完成）
         async function goToPlaceBookStep(btn) {
             if (scannedBooks.length === 0) return;
-            // 若當前書籍標記為含附件，先進入附件提示步驟
-            if (currentProcessingBook) {
-                nextStep('step-attachment-prompt');
-                return;
-            }
+            // 不顯示附件提示，直接進入投書流程
+            currentProcessingBook = null;
             if (btn) btn.disabled = true;
             // 先喚醒並執行 homing，再執行 open，避免因 state4 導致 open 失敗
             showLoading('機器啟動中 請稍等');
@@ -785,11 +853,8 @@
         function setConfirmNextButtonLabel() {
             const btn = document.getElementById('confirm-next-btn');
             if (!btn) return;
-            if (currentProcessingBook) {
-                btn.innerHTML = '<i class="fas fa-arrow-right"></i> 下一步：附件處理';
-            } else {
-                btn.innerHTML = '<i class="fas fa-arrow-right"></i> 下一步：投入還書箱';
-            }
+            const text = (window.I18N && window.I18N.confirm_next) ? window.I18N.confirm_next : '下一步：投入還書箱';
+            btn.innerHTML = '<i class="fas fa-arrow-right"></i> ' + text;
         }
 
         function startAutoRedirect() {
@@ -903,8 +968,17 @@
     
                 if (result.success) {
                     hideLoading();
-                    nextStep('step-success');
-                    startAutoRedirect();
+                    const overdueMsg = result.overdue_message;
+                    if (overdueMsg) {
+                        // 若館方回傳 AF/AG 逾期說明，先顯示提示 10 秒（或使用者點擊關閉），再進入成功畫面
+                        showOverdueMessage(overdueMsg, 10, () => {
+                            nextStep('step-success');
+                            startAutoRedirect();
+                        });
+                    } else {
+                        nextStep('step-success');
+                        startAutoRedirect();
+                    }
                 } else {
                     hideLoading();
                     // 如果是書籍未放入的錯誤，後端已重開門，前端需提示使用者
@@ -1010,12 +1084,20 @@
 
                 // 書籍歸還成功 (門已關，且已 checkin)
                 hideLoading();
-                
-                // 重置附件條碼暫存
-                currentAttachmentBarcode = null;
 
-                // 進入附件掃描核對步驟
-                nextStep('step-scan-attachment');
+                const overdueMsg = result.overdue_message;
+                const proceedToAttachmentScan = () => {
+                    // 重置附件條碼暫存
+                    currentAttachmentBarcode = null;
+                    // 進入附件掃描核對步驟
+                    nextStep('step-scan-attachment');
+                };
+
+                if (overdueMsg) {
+                    showOverdueMessage(overdueMsg, 10, proceedToAttachmentScan);
+                } else {
+                    proceedToAttachmentScan();
+                }
 
             } catch (e) {
                 hideLoading();
@@ -1128,11 +1210,21 @@
    
                 if(result.success) {
                     hideLoading();
-                    // 清除暫存
-                    currentAttachmentBarcode = null;
-                    currentProcessingBook = null;
-                    nextStep('step-success');
-                    startAutoRedirect();
+
+                    const overdueMsg = result.overdue_message;
+                    const finishSuccessFlow = () => {
+                        // 清除暫存
+                        currentAttachmentBarcode = null;
+                        currentProcessingBook = null;
+                        nextStep('step-success');
+                        startAutoRedirect();
+                    };
+
+                    if (overdueMsg) {
+                        showOverdueMessage(overdueMsg, 10, finishSuccessFlow);
+                    } else {
+                        finishSuccessFlow();
+                    }
                 } else {
                     hideLoading();
                     alert(result.message || '附件處理異常，但書籍已歸還。');

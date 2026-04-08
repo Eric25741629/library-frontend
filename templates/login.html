@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>圖書館管理後台登入</title>
+    <title>{{ t('login.title', '圖書館管理後台登入') }}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
@@ -61,29 +61,37 @@
     <div class="login-container">
         <div class="login-header">
             <i class="fas fa-user-shield"></i>
-            <h2>管理後台登入</h2>
+            <h2>{{ t('login.heading', '管理後台登入') }}</h2>
         </div>
         
-        <div id="error-msg" class="error-message">密碼錯誤，請重試</div>
+        <div id="error-msg" class="error-message">{{ t('login.error_wrong_password', '密碼錯誤，請重試') }}</div>
 
         <form id="login-form" onsubmit="handleLogin(event)">
             <div class="form-group">
-                <label for="password">管理員密碼</label>
-                <input type="password" id="password" class="form-control" placeholder="請輸入密碼" required autofocus>
+                <label for="username">{{ t('login.username_label', '管理員帳號') }}</label>
+                <input type="text" id="username" class="form-control" placeholder="{{ t('login.username_placeholder', '請輸入帳號') }}" required autofocus>
+            </div>
+            <div class="form-group">
+                <label for="password">{{ t('login.password_label', '管理員密碼') }}</label>
+                <input type="password" id="password" class="form-control" placeholder="{{ t('login.password_placeholder', '請輸入密碼') }}" required>
             </div>
             <button type="submit" class="btn-primary btn-block">
-                <i class="fas fa-sign-in-alt"></i> 登入
+                <i class="fas fa-sign-in-alt"></i> {{ t('login.submit', '登入') }}
             </button>
         </form>
         
         <div style="margin-top: 1.5rem;">
             <a href="/" style="color: #666; text-decoration: none; font-size: 0.9rem;">
-                <i class="fas fa-arrow-left"></i> 返回前台
+                <i class="fas fa-arrow-left"></i> {{ t('footer.back_to_front', '返回前台') }}
             </a>
         </div>
     </div>
 
     <script>
+        const I18N = {
+            login_failed: "{{ t('login.failed', '登入失敗') }}",
+            login_error: "{{ t('login.system_error', '系統錯誤') }}"
+        };
         // 閒置檢測 (5分鐘) - 自動返回首頁
         let idleTime = 0;
         const idleLimit = 5 * 60; // 5 minutes in seconds
@@ -107,6 +115,7 @@
 
         async function handleLogin(e) {
             e.preventDefault();
+            const username = document.getElementById('username').value.trim();
             const password = document.getElementById('password').value;
             const errorMsg = document.getElementById('error-msg');
             
@@ -114,7 +123,7 @@
                 const response = await fetch('/login', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ password: password })
+                    body: JSON.stringify({ username, password })
                 });
                 
                 const result = await response.json();
@@ -123,12 +132,12 @@
                     window.location.href = '/admin';
                 } else {
                     errorMsg.style.display = 'block';
-                    errorMsg.textContent = result.message || '登入失敗';
+                    errorMsg.textContent = result.message || I18N.login_failed;
                 }
             } catch (err) {
                 console.error(err);
                 errorMsg.style.display = 'block';
-                errorMsg.textContent = '系統錯誤';
+                errorMsg.textContent = I18N.login_error;
             }
         }
     </script>
@@ -136,16 +145,26 @@
 </html>
 <script>
 document.addEventListener('DOMContentLoaded', () => {
+    const user = document.getElementById('username');
     const pwd = document.getElementById('password');
-    if (pwd) pwd.focus();
+    if (user) user.focus();
 
-    // 全域鍵盤監聽：若不在輸入框，將焦點移至密碼欄，方便條碼掃描器（模擬鍵盤）直接輸入
+    // 全域鍵盤監聽：只有在不在可輸入元件時，才把焦點導向帳號欄
     document.addEventListener('keydown', (e) => {
-        const input = document.getElementById('password');
+        const input = document.getElementById('username');
         if (!input) return;
-        if (document.activeElement !== input && !e.ctrlKey && !e.altKey && !e.metaKey) {
-            input.focus();
-        }
+        if (e.ctrlKey || e.altKey || e.metaKey) return;
+
+        const active = document.activeElement;
+        const tag = active && active.tagName ? active.tagName.toLowerCase() : '';
+        const isTypingTarget = !!active && (
+            tag === 'input' ||
+            tag === 'textarea' ||
+            tag === 'select' ||
+            active.isContentEditable
+        );
+
+        if (!isTypingTarget) input.focus();
     });
 
     // 當按下 Enter 時觸發登入（條碼掃描器通常會在末端送出 Enter）

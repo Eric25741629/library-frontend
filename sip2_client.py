@@ -231,35 +231,75 @@ class SIP2Client:
         resp = self._send_message(msg)
         if not resp: 
             self.logger.error(f"No response from SIP2 server for checkin: {barcode}")
-            return False
+            return {
+                "success": False,
+                "af_message": None,
+                "ag_message": None,
+                "error_message": "No response from SIP2 server"
+            }
 
         # 10 Checkin Response
         # 格式：10<ok><resensitize><magnetic media><alert><date>...
         # ok 標誌在第 3 位（索引 2）：'1' = 成功，'0' = 失敗
         if not resp.startswith('10'):
             self.logger.error(f"Unexpected checkin response format: {resp[:20]}...")
-            return False
+            return {
+                "success": False,
+                "af_message": None,
+                "ag_message": None,
+                "error_message": "Unexpected checkin response format"
+            }
         
         if len(resp) < 3:
             self.logger.error(f"Checkin response too short: {resp}")
-            return False
+            return {
+                "success": False,
+                "af_message": None,
+                "ag_message": None,
+                "error_message": "Checkin response too short"
+            }
         
         ok_flag = resp[2]
-        if ok_flag == '1':
-            self.logger.info(f"Checkin successful for {barcode}")
-            return True
-        else:
-            # 解析錯誤訊息（AF/AG 欄位）
-            error_msg = "未知錯誤"
+
+        # 先抽取 AF / AG 訊息，無論成功或失敗都保留原始內容
+        af_msg = None
+        ag_msg = None
+        try:
             parts = resp.split('|')
             for part in parts:
-                if part.startswith('AF') or part.startswith('AG'):
+                if part.startswith('AF'):
                     msg = part[2:].strip()
                     if msg:
-                        error_msg = msg
-                        break
-            self.logger.warning(f"Checkin failed for {barcode}: {error_msg}")
-            return False
+                        af_msg = msg
+                elif part.startswith('AG'):
+                    msg = part[2:].strip()
+                    if msg:
+                        ag_msg = msg
+        except Exception as e:
+            self.logger.debug(f"Parse AF/AG in checkin response failed: {e}")
+
+        # 只要 09 回傳 10 且 ok_flag == '1'，一律視為成功，不再因 AF/AG 拒絕還書
+        if ok_flag == '1':
+            self.logger.info(f"Checkin successful for {barcode}")
+            if af_msg:
+                self.logger.info(f"Checkin AF message: {af_msg}")
+            if ag_msg:
+                self.logger.info(f"Checkin AG message: {ag_msg}")
+            return {
+                "success": True,
+                "af_message": af_msg,
+                "ag_message": ag_msg
+            }
+
+        # ok_flag != '1' 視為真正拒絕還書，這時才把 AF/AG 當成錯誤訊息
+        error_msg = af_msg or ag_msg or "未知錯誤"
+        self.logger.warning(f"Checkin failed for {barcode}: {error_msg}")
+        return {
+            "success": False,
+            "af_message": af_msg,
+            "ag_message": ag_msg,
+            "error_message": error_msg
+        }
 
     def health_check(self):
         # 用 99 SC Status 做健康檢查
@@ -332,7 +372,11 @@ class MockSIP2Client:
         return book_data
 
     def checkin_book(self, barcode):
-        return True
+        return {
+            "success": True,
+            "af_message": None,
+            "ag_message": None
+        }
 
     def health_check(self):
         return True

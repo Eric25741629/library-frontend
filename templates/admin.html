@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>圖書館還書管理後台</title>
+    <title>{{ t('admin.title', '圖書館還書管理後台') }}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&display=swap" rel="stylesheet">
@@ -30,6 +30,9 @@
             color: var(--text-primary);
             display: flex;
             min-height: 100vh;
+            height: auto;
+            overflow-y: auto;
+            overflow-x: hidden;
         }
 
         /* Sidebar */
@@ -90,6 +93,29 @@
             margin-top: auto;
             border-top: 1px solid var(--border-color);
             padding-top: 20px;
+        }
+
+        .lang-switch-admin {
+            display: flex;
+            gap: 8px;
+            margin-top: 12px;
+        }
+
+        .lang-btn-admin {
+            padding: 6px 10px;
+            border-radius: 8px;
+            border: 1px solid rgba(0,0,0,0.08);
+            background: #fff;
+            color: var(--text-secondary);
+            font-size: 12px;
+            text-decoration: none;
+            font-weight: 500;
+        }
+
+        .lang-btn-admin.active {
+            color: var(--primary-color);
+            border-color: rgba(67, 97, 238, 0.35);
+            background: rgba(67, 97, 238, 0.08);
         }
 
         /* Main Content */
@@ -196,6 +222,23 @@
             font-size: 24px;
             font-weight: 700;
             color: var(--text-primary);
+        }
+
+        .bin-counts {
+            display: grid;
+            grid-template-columns: 48px auto;
+            column-gap: 8px;
+            row-gap: 4px;
+            align-items: center;
+            margin: 5px 0 0;
+            font-size: 18px;
+            font-weight: 700;
+            color: var(--text-primary);
+        }
+
+        .bin-label {
+            color: var(--text-secondary);
+            font-weight: 500;
         }
 
         /* Content Grid */
@@ -459,33 +502,37 @@
     <nav class="sidebar">
         <div class="logo">
             <i class="fas fa-book-reader"></i>
-            <span>LibraryOS</span>
+            <span>{{ t('admin.logo', 'LibraryOS') }}</span>
         </div>
         
         <div class="nav-menu">
             <a href="#" class="nav-item active" onclick="switchTab('dashboard')">
                 <i class="fas fa-th-large"></i>
-                <span>總覽儀表板</span>
+                <span>{{ t('admin.nav.dashboard', '總覽儀表板') }}</span>
             </a>
             <a href="#" class="nav-item" onclick="switchTab('machine')">
                 <i class="fas fa-robot"></i>
-                <span>機器控制</span>
+                <span>{{ t('admin.nav.machine', '機器控制') }}</span>
             </a>
             <a href="#" class="nav-item" onclick="switchTab('settings')">
                 <i class="fas fa-cog"></i>
-                <span>系統設定</span>
+                <span>{{ t('admin.nav.settings', '系統設定') }}</span>
             </a>
         </div>
 
         <div class="sidebar-footer">
             <a href="/" class="nav-item">
                 <i class="fas fa-external-link-alt"></i>
-                <span>返回前台</span>
+                <span>{{ t('footer.back_to_front', '返回前台') }}</span>
             </a>
             <a href="/logout" class="nav-item" style="color: var(--danger-color);">
                 <i class="fas fa-sign-out-alt"></i>
-                <span>登出系統</span>
+                <span>{{ t('footer.logout', '登出系統') }}</span>
             </a>
+            <div class="lang-switch-admin">
+                <a class="lang-btn-admin {% if current_lang == 'zh-TW' %}active{% endif %}" href="/set-lang/zh-TW">{{ t('lang.zh', '中文') }}</a>
+                <a class="lang-btn-admin {% if current_lang == 'en' %}active{% endif %}" href="/set-lang/en">{{ t('lang.en', 'English') }}</a>
+            </div>
         </div>
     </nav>
 
@@ -495,21 +542,18 @@
         <div id="view-dashboard">
             <div class="header">
                 <div class="page-title">
-                    <h1>還書管理後台</h1>
-                    <p>歡迎回來，管理員</p>
+                    <h1>{{ t('admin.header.title', '還書管理後台') }}</h1>
+                    <p>{{ t('admin.header.subtitle', '歡迎回來，管理員') }}</p>
                 </div>
                 <div class="header-actions">
                     <span style="align-self:center; color: var(--text-secondary); font-size: 13px; margin-right: 8px;">
-                        版本：{{ app_version or 'unknown' }}
+                        {{ t('admin.version', '版本：') }}{{ app_version or 'unknown' }}
                     </span>
-                    <button class="btn btn-warning" onclick="clearHistory()">
-                        <i class="fas fa-eraser"></i> 清空紀錄
-                    </button>
                     <button class="btn btn-danger" onclick="clearBox()">
-                        <i class="fas fa-trash-alt"></i> 清空還書箱
+                        <i class="fas fa-trash-alt"></i> {{ t('admin.clear_box', '清空還書箱') }}
                     </button>
                     <button class="btn btn-primary" onclick="fetchLogs()">
-                        <i class="fas fa-sync-alt"></i> 重新整理
+                        <i class="fas fa-sync-alt"></i> {{ t('admin.refresh', '重新整理') }}
                     </button>
                 </div>
             </div>
@@ -521,8 +565,13 @@
                         <i class="fas fa-book"></i>
                     </div>
                     <div class="stat-info">
-                        <h3>目前書籍數量</h3>
-                        <p><span id="total-count">0</span> / <span id="total-limit">20</span></p>
+                        <h3>{{ t('admin.stats.current_count', '目前書籍數量') }}</h3>
+                        <div class="bin-counts">
+                            <span class="bin-label">{{ t('admin.stats.bin1', '箱1：') }}</span>
+                            <span><span id="total-count-1">0</span> / <span id="total-limit-1">20</span></span>
+                            <span class="bin-label">{{ t('admin.stats.bin2', '箱2：') }}</span>
+                            <span><span id="total-count-2">0</span> / <span id="total-limit-2">20</span></span>
+                        </div>
                     </div>
                 </div>
                 <div class="stat-card">
@@ -530,9 +579,9 @@
                         <i class="fas fa-robot"></i>
                     </div>
                     <div class="stat-info">
-                        <h3>機器狀態</h3>
+                        <h3>{{ t('admin.stats.machine_status', '機器狀態') }}</h3>
                         <p style="font-size: 18px;">
-                            <span id="machine-state-badge" class="status-badge">未知</span>
+                            <span id="machine-state-badge" class="status-badge">{{ t('admin.state.unknown', '未知') }}</span>
                             <span id="machine-state-text" style="margin-left:8px;color:var(--text-secondary); font-size:14px;"></span>
                         </p>
                     </div>
@@ -542,7 +591,7 @@
                         <i class="fas fa-clock"></i>
                     </div>
                     <div class="stat-info">
-                        <h3>今日還書總數</h3>
+                        <h3>{{ t('admin.stats.today_total', '今日還書總數') }}</h3>
                         <p id="today-total">0</p>
                     </div>
                 </div>
@@ -551,13 +600,16 @@
             <!-- Table -->
             <div class="card">
                 <div class="card-header">
-                    <h2 class="card-title" id="table-title">當前箱內列表</h2>
+                    <h2 class="card-title" id="table-title">{{ t('admin.table.current_title', '當前箱內列表') }}</h2>
                     <div style="display: flex; gap: 10px;">
+                        <button class="btn btn-warning" id="btn-clear-history" onclick="clearHistory()" style="padding: 6px 12px; font-size: 13px; display: none;">
+                            <i class="fas fa-eraser"></i> {{ t('admin.table.clear_history', '清空紀錄') }}
+                        </button>
                         <button class="btn btn-primary" id="btn-current-list" onclick="switchList('current')" style="padding: 6px 12px; font-size: 13px;">
-                            <i class="fas fa-box-open"></i> 當前列表
+                            <i class="fas fa-box-open"></i> {{ t('admin.table.current_btn', '當前列表') }}
                         </button>
                         <button class="btn btn-secondary" id="btn-history-list" onclick="switchList('history')" style="padding: 6px 12px; font-size: 13px; background: #e0e5f2; color: #5f6c7b;">
-                            <i class="fas fa-history"></i> 歷史列表
+                            <i class="fas fa-history"></i> {{ t('admin.table.history_btn', '歷史列表') }}
                         </button>
                     </div>
                 </div>
@@ -565,11 +617,11 @@
                     <table id="logs-table">
                         <thead>
                             <tr>
-                                <th>ID</th>
-                                <th>書籍資訊</th>
-                                <th>書籍編號</th>
-                                <th>還書時間</th>
-                                <th id="header-status-or-clear-time">狀態</th>
+                                <th>{{ t('admin.table.id', 'ID') }}</th>
+                                <th>{{ t('admin.table.book_info', '書籍資訊') }}</th>
+                                <th>{{ t('admin.table.book_id', '書籍編號') }}</th>
+                                <th>{{ t('admin.table.return_time', '還書時間') }}</th>
+                                <th id="header-status-or-clear-time">{{ t('admin.table.status', '狀態') }}</th>
                             </tr>
                         </thead>
                         <tbody id="logs-body">
@@ -578,7 +630,7 @@
                     </table>
                     <div id="empty-message" class="empty-state" style="display: none;">
                         <i class="fas fa-inbox" style="font-size: 48px; margin-bottom: 16px; opacity: 0.3;"></i>
-                        <p>目前尚無紀錄</p>
+                        <p>{{ t('admin.table.empty', '目前尚無紀錄') }}</p>
                     </div>
                 </div>
             </div>
@@ -588,62 +640,62 @@
         <div id="view-machine" style="display: none;">
             <div class="header">
                 <div class="page-title">
-                    <h1>機器控制中心</h1>
-                    <p>直接發送指令控制硬體設備</p>
+                    <h1>{{ t('admin.machine.title', '機器控制中心') }}</h1>
+                    <p>{{ t('admin.machine.subtitle', '直接發送指令控制硬體設備') }}</p>
                 </div>
             </div>
 
             <div class="content-grid">
                 <div class="card">
                     <div class="card-header">
-                        <h2 class="card-title">快速指令</h2>
+                        <h2 class="card-title">{{ t('admin.machine.quick_cmds', '快速指令') }}</h2>
                     </div>
                     <div style="margin-bottom:12px;">
-                        <span id="machine-control-state" class="status-badge">未知</span>
+                        <span id="machine-control-state" class="status-badge">{{ t('admin.state.unknown', '未知') }}</span>
                         <small id="machine-control-sub" style="color:var(--text-secondary); margin-left:8px;"></small>
                     </div>
                     <div class="control-grid" style="grid-template-columns: repeat(4, 1fr);">
                         <button class="control-btn" onclick="sendMachineCommand('dep1')">
-                            <i class="fas fa-power-off" style="color: var(--success-color);"></i> 喚醒
+                            <i class="fas fa-power-off" style="color: var(--success-color);"></i> {{ t('admin.machine.wake', '喚醒') }}
                         </button>
                         <button class="control-btn" onclick="sendMachineCommand('dep0')">
-                            <i class="fas fa-power-off" style="color: var(--danger-color);"></i> 休眠
+                            <i class="fas fa-power-off" style="color: var(--danger-color);"></i> {{ t('admin.machine.sleep', '休眠') }}
                         </button>
                         <button class="control-btn" onclick="sendMachineCommand('homing')">
-                            <i class="fas fa-home"></i> 回原點
+                            <i class="fas fa-home"></i> {{ t('admin.machine.home', '回原點') }}
                         </button>
                         <button class="control-btn" onclick="sendMachineCommand('state')">
-                            <i class="fas fa-info-circle"></i> 查詢狀態
+                            <i class="fas fa-info-circle"></i> {{ t('admin.machine.query_state', '查詢狀態') }}
                         </button>
                         <button class="control-btn" onclick="sendMachineCommand('open')">
-                            <i class="fas fa-door-open"></i> 開門
+                            <i class="fas fa-door-open"></i> {{ t('admin.machine.open', '開門') }}
                         </button>
                         <button class="control-btn" onclick="sendMachineCommand('close')">
-                            <i class="fas fa-door-closed"></i> 關門
+                            <i class="fas fa-door-closed"></i> {{ t('admin.machine.close', '關門') }}
                         </button>
                         <button class="control-btn" onclick="sendMachineCommand('put1')">
-                            <i class="fas fa-box"></i> 分類箱 1
+                            <i class="fas fa-box"></i> {{ t('admin.machine.bin1', '分類箱 1') }}
                         </button>
                         <button class="control-btn" onclick="sendMachineCommand('put2')">
-                            <i class="fas fa-box-open"></i> 分類箱 2
+                            <i class="fas fa-box-open"></i> {{ t('admin.machine.bin2', '分類箱 2') }}
                         </button>
                         <button class="control-btn" onclick="sendMachineReset()">
-                            <i class="fas fa-sync-alt"></i> 重置
+                            <i class="fas fa-sync-alt"></i> {{ t('admin.machine.reset', '重置') }}
                         </button>
                     </div>
                     
                     <div style="margin-top: 24px; display: flex; gap: 12px;">
-                        <input type="text" id="custom-cmd" class="form-input" placeholder="輸入自訂指令 (例如: opbm1)">
-                        <button class="btn btn-primary" onclick="sendCustom()">發送指令</button>
+                        <input type="text" id="custom-cmd" class="form-input" placeholder="{{ t('admin.machine.custom_placeholder', '輸入自訂指令 (例如: opbm1)') }}">
+                        <button class="btn btn-primary" onclick="sendCustom()">{{ t('admin.machine.send_cmd', '發送指令') }}</button>
                     </div>
                 </div>
 
                 <div class="card">
                     <div class="card-header">
-                        <h2 class="card-title">終端機回應</h2>
-                        <button class="btn btn-warning" style="padding: 4px 8px; font-size: 12px;" onclick="document.getElementById('machine-response').value=''">清除</button>
+                        <h2 class="card-title">{{ t('admin.machine.terminal', '終端機回應') }}</h2>
+                        <button class="btn btn-warning" style="padding: 4px 8px; font-size: 12px;" onclick="document.getElementById('machine-response').value=''">{{ t('admin.machine.clear', '清除') }}</button>
                     </div>
-                    <textarea id="machine-response" class="terminal-output" readonly>等待指令...</textarea>
+                    <textarea id="machine-response" class="terminal-output" readonly>{{ t('admin.machine.waiting', '等待指令...') }}</textarea>
                 </div>
             </div>
         </div>
@@ -652,21 +704,24 @@
         <div id="view-settings" style="display: none;">
             <div class="header">
                 <div class="page-title">
-                    <h1>系統設定</h1>
-                    <p>調整系統參數與硬體連線</p>
+                    <h1>{{ t('admin.settings.title', '系統設定') }}</h1>
+                    <p>{{ t('admin.settings.subtitle', '調整系統參數與硬體連線') }}</p>
                 </div>
             </div>
 
             <div class="card" style="max-width: 800px;">
                 <div class="settings-tabs">
                     <div class="settings-tab active" onclick="switchSettingsTab('library')">
-                        <i class="fas fa-book"></i> 圖書館資料庫 (SIP2)
+                        <i class="fas fa-book"></i> {{ t('admin.settings.tab.library', '圖書館資料庫 (SIP2)') }}
                     </div>
                     <div class="settings-tab" onclick="switchSettingsTab('machine')">
-                        <i class="fas fa-robot"></i> 還書機與硬體
+                        <i class="fas fa-robot"></i> {{ t('admin.settings.tab.machine', '還書機與硬體') }}
+                    </div>
+                    <div class="settings-tab" onclick="switchSettingsTab('admin_auth')">
+                        <i class="fas fa-user-shield"></i> {{ t('admin.settings.tab.admin_auth', '還書機管理員帳號設定') }}
                     </div>
                     <div class="settings-tab" onclick="switchSettingsTab('front_images')">
-                        <i class="fas fa-image"></i> 前台介面圖片
+                        <i class="fas fa-image"></i> {{ t('admin.settings.tab.front_images', '前台介面圖片') }}
                     </div>
                 </div>
 
@@ -678,8 +733,8 @@
                             <span class="slider round"></span>
                         </label>
                         <label for="lib-mock-enabled" style="cursor:pointer; color:var(--text-primary); font-weight:500;">
-                            啟用 Mock 模擬模式
-                            <span style="font-weight:400; color:var(--text-secondary); font-size:13px;">(開啟後將不會實際連線至 SIP2 Server)</span>
+                            {{ t('admin.settings.lib.mock', '啟用 Mock 模擬模式') }}
+                            <span style="font-weight:400; color:var(--text-secondary); font-size:13px;">{{ t('admin.settings.lib.mock_hint', '(開啟後將不會實際連線至 SIP2 Server)') }}</span>
                         </label>
                     </div>
 
@@ -689,8 +744,8 @@
                             <span class="slider round"></span>
                         </label>
                         <label for="lib-checkin-enabled" style="cursor:pointer; color:var(--text-primary); font-weight:500;">
-                            啟用真實還書 (SIP2 Checkin)
-                            <span style="display:block; font-weight:400; color:var(--text-secondary); font-size:13px;">關閉時僅機器收書與本機記錄，不會在圖書館帳號中完成還書。</span>
+                            {{ t('admin.settings.lib.checkin', '啟用真實還書 (SIP2 Checkin)') }}
+                            <span style="display:block; font-weight:400; color:var(--text-secondary); font-size:13px;">{{ t('admin.settings.lib.checkin_hint', '關閉時僅機器收書與本機記錄，不會在圖書館帳號中完成還書。') }}</span>
                         </label>
                     </div>
 
@@ -700,18 +755,18 @@
                             <span class="slider round"></span>
                         </label>
                         <label for="lib-attachment-enabled" style="cursor:pointer; color:var(--text-primary); font-weight:500;">
-                            接受附件書籍
-                            <span style="display:block; font-weight:400; color:var(--text-secondary); font-size:13px;">開啟時允許還附件書籍；關閉時偵測到附件書籍會拒絕還書。</span>
+                            {{ t('admin.settings.lib.attachment', '接受附件書籍') }}
+                            <span style="display:block; font-weight:400; color:var(--text-secondary); font-size:13px;">{{ t('admin.settings.lib.attachment_hint', '開啟時允許還附件書籍；關閉時偵測到附件書籍會拒絕還書。') }}</span>
                         </label>
                     </div>
 
                     <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
                         <div class="form-group">
-                            <label class="form-label">伺服器 IP (Host)</label>
+                            <label class="form-label">{{ t('admin.settings.lib.host', '伺服器 IP (Host)') }}</label>
                             <input type="text" id="lib-host" class="form-input" placeholder="192.168.1.100">
                         </div>
                         <div class="form-group">
-                            <label class="form-label">連接埠 (Port)</label>
+                            <label class="form-label">{{ t('admin.settings.lib.port', '連接埠 (Port)') }}</label>
                             <input type="number" id="lib-port" class="form-input" placeholder="6001">
                         </div>
                     </div>
@@ -721,45 +776,45 @@
                             <input type="checkbox" id="lib-login-enabled" onchange="toggleLibLogin(this.checked)">
                             <span class="slider round"></span>
                         </label>
-                        <label for="lib-login-enabled" style="cursor:pointer; color:var(--text-primary); font-weight:500;">啟用 SIP2 帳號登入</label>
+                        <label for="lib-login-enabled" style="cursor:pointer; color:var(--text-primary); font-weight:500;">{{ t('admin.settings.lib.login_enabled', '啟用 SIP2 帳號登入') }}</label>
                     </div>
 
                     <div id="lib-login-fields" style="display:none; padding:16px; background:#f8f9fa; border-radius:8px; margin-bottom:20px;">
                         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
                             <div class="form-group" style="margin-bottom:0;">
-                                <label class="form-label">登入帳號 (Login User)</label>
+                                <label class="form-label">{{ t('admin.settings.lib.login_user', '登入帳號 (Login User)') }}</label>
                                 <input type="text" id="lib-user" class="form-input" placeholder="選填">
                             </div>
                             <div class="form-group" style="margin-bottom:0;">
-                                <label class="form-label">登入密碼 (Login Pass)</label>
+                                <label class="form-label">{{ t('admin.settings.lib.login_pass', '登入密碼 (Login Pass)') }}</label>
                                 <input type="password" id="lib-pass" class="form-input" placeholder="選填">
                             </div>
                         </div>
                     </div>
 
                     <div class="form-group">
-                        <label class="form-label">機構代碼 (AO Institution ID)</label>
+                        <label class="form-label">{{ t('admin.settings.lib.institution', '機構代碼 (AO Institution ID)') }}</label>
                         <input type="text" id="lib-inst" class="form-input" placeholder="MAIN">
-                        <small style="color:var(--text-secondary)">預設為 MAIN，請依據 SIP2 Server 要求填寫</small>
+                        <small style="color:var(--text-secondary)">{{ t('admin.settings.lib.institution_hint', '預設為 MAIN，請依據 SIP2 Server 要求填寫') }}</small>
                     </div>
 
                     <div style="margin-top: 30px; display: flex; justify-content: space-between; align-items: center;">
                          <button class="btn btn-secondary" onclick="testLibraryConn()" style="background:#e0e5f2; color:#5f6c7b;">
-                            <i class="fas fa-network-wired"></i> 測試 SIP2 連線
+                            <i class="fas fa-network-wired"></i> {{ t('admin.settings.lib.test_sip2', '測試 SIP2 連線') }}
                         </button>
                         <button class="btn btn-primary" onclick="saveSettings()">
-                            <i class="fas fa-save"></i> 儲存所有設定
+                            <i class="fas fa-save"></i> {{ t('admin.settings.save_all', '儲存所有設定') }}
                         </button>
                     </div>
                 </div>
 
                 <!-- Machine Settings Tab -->
                 <div id="settings-tab-machine" class="settings-section">
-                    <h3 style="margin-bottom: 20px; color:var(--text-primary);">基本參數</h3>
+                    <h3 style="margin-bottom: 20px; color:var(--text-primary);">{{ t('admin.settings.machine.basic', '基本參數') }}</h3>
                     <div class="form-group">
-                        <label class="form-label">還書箱容量上限 (本)</label>
+                        <label class="form-label">{{ t('admin.settings.machine.limit', '還書箱容量上限 (本)') }}</label>
                         <input type="number" id="settings-limit" class="form-input" min="1" max="100" value="{{ config.max_return_limit if config is defined else 20 }}">
-                        <small style="color:var(--text-secondary)">當箱內書籍數量達到此上限時，系統將暫停服務</small>
+                        <small style="color:var(--text-secondary)">{{ t('admin.settings.machine.limit_hint', '當箱內書籍數量達到此上限時，系統將暫停服務') }}</small>
                     </div>
 
                     <div class="form-group" style="display:flex; align-items:center; gap:12px; margin-top:10px; margin-bottom:10px;">
@@ -767,74 +822,114 @@
                             <input type="checkbox" id="settings-book-check">
                             <span class="slider round"></span>
                         </label>
-                        <label for="settings-book-check" style="cursor:pointer; color:var(--text-primary); font-weight:500;">啟用書籍檢測 (Book Check)</label>
+                        <label for="settings-book-check" style="cursor:pointer; color:var(--text-primary); font-weight:500;">{{ t('admin.settings.machine.book_check', '啟用放入檢查') }}</label>
                     </div>
-                    <small style="display:block; color:var(--text-secondary); margin-bottom:20px;">關閉此功能後，系統在還書時將不會檢查是否真的有書籍放入，直接進行後續動作。</small>
+                    <small style="display:block; color:var(--text-secondary); margin-bottom:20px;">{{ t('admin.settings.machine.book_check_hint', '開啟後會檢查是否真的有放入書本；關閉時不檢查放入狀態，直接進行後續動作。') }}</small>
 
                     <div style="height: 1px; background: var(--border-color); margin: 30px 0;"></div>
 
-                    <h3 style="margin-bottom: 20px; color:var(--text-primary);">UART 硬體連線</h3>
+                    <h3 style="margin-bottom: 20px; color:var(--text-primary);">{{ t('admin.settings.machine.uart', 'UART 硬體連線') }}</h3>
                     <div class="form-group">
-                        <label class="form-label">序列埠 (Port)</label>
+                        <label class="form-label">{{ t('admin.settings.machine.port', '序列埠 (Port)') }}</label>
                         <input type="text" id="uart-port" class="form-input" placeholder="/dev/uno">
                     </div>
                     <div class="form-group">
-                        <label class="form-label">鮑率 (Baudrate)</label>
+                        <label class="form-label">{{ t('admin.settings.machine.baudrate', '鮑率 (Baudrate)') }}</label>
                         <input type="number" id="uart-baud" class="form-input" placeholder="38400">
                     </div>
 
                     <div style="margin-top: 30px; display: flex; justify-content: space-between; align-items: center;">
                         <button class="btn btn-warning" onclick="testUART()">
-                            <i class="fas fa-plug"></i> 測試 UART 連線
+                            <i class="fas fa-plug"></i> {{ t('admin.settings.machine.test_uart', '測試 UART 連線') }}
                         </button>
                         <button class="btn btn-primary" onclick="saveSettings()">
-                            <i class="fas fa-save"></i> 儲存所有設定
+                            <i class="fas fa-save"></i> {{ t('admin.settings.save_all', '儲存所有設定') }}
                         </button>
                     </div>
                     
                     <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--border-color); display: flex; gap: 12px;">
                         <button class="btn btn-danger" onclick="disconnectUART()">
-                            <i class="fas fa-unlink"></i> 斷開連線
+                            <i class="fas fa-unlink"></i> {{ t('admin.settings.machine.disconnect', '斷開連線') }}
                         </button>
                         <button class="btn btn-secondary" style="background:#e0e5f2; color:#5f6c7b;" onclick="reconnectUART()">
-                            <i class="fas fa-sync"></i> 重新連線
+                            <i class="fas fa-sync"></i> {{ t('admin.settings.machine.reconnect', '重新連線') }}
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Admin Auth Settings Tab -->
+                <div id="settings-tab-admin_auth" class="settings-section">
+                    <h3 style="margin-bottom: 16px; color:var(--text-primary);">{{ t('admin.settings.auth.title', '後台登入保護') }}</h3>
+                    <div class="form-group" style="display:flex; align-items:center; gap:12px; margin-top:10px; margin-bottom:10px;">
+                        <label class="switch">
+                            <input type="checkbox" id="settings-require-admin-login">
+                            <span class="slider round"></span>
+                        </label>
+                        <label for="settings-require-admin-login" style="cursor:pointer; color:var(--text-primary); font-weight:500;">{{ t('admin.settings.auth.require_login', '啟用後台登入保護') }}</label>
+                    </div>
+                    <small style="display:block; color:var(--text-secondary); margin-bottom:12px;">{{ t('admin.settings.auth.require_login_hint', '啟用後，進入管理後台需先登入。') }}</small>
+
+                    <div class="form-group">
+                        <label class="form-label">{{ t('admin.settings.auth.username', '管理員帳號') }}</label>
+                        <input type="text" id="settings-admin-username" class="form-input" placeholder="admin">
+                    </div>
+
+                    <div class="form-group" style="margin-bottom:14px;">
+                        <label class="form-label">{{ t('admin.settings.auth.password', '管理員密碼') }}</label>
+                        <div style="position:relative;">
+                            <input type="password" id="settings-admin-password" class="form-input" style="padding-right:44px;" placeholder="{{ t('admin.settings.auth.password_hint', '留空代表不變更密碼') }}">
+                            <button type="button" id="btn-toggle-admin-password" onclick="togglePasswordVisibility('settings-admin-password', 'btn-toggle-admin-password')" style="position:absolute; right:8px; top:50%; transform:translateY(-50%); border:none; background:transparent; cursor:pointer; color:var(--text-secondary);">
+                                <i class="fas fa-eye"></i>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="form-group" style="margin-bottom:20px;">
+                        <label class="form-label">{{ t('admin.settings.auth.password_confirm', '重複輸入管理員密碼') }}</label>
+                        <input type="password" id="settings-admin-password-confirm" class="form-input" placeholder="{{ t('admin.settings.auth.password_confirm_hint', '請再次輸入密碼') }}">
+                        <small style="display:block; color:var(--text-secondary); margin-top:8px;">{{ t('admin.settings.auth.password_match_hint', '兩次輸入密碼需一致，才可設定新密碼。') }}</small>
+                    </div>
+
+                    <div style="margin-top: 30px; display: flex; justify-content: flex-end; align-items: center;">
+                        <button class="btn btn-primary" onclick="saveAdminAuthSettings()">
+                            <i class="fas fa-save"></i> {{ t('admin.settings.auth.save', '儲存管理員帳號設定') }}
                         </button>
                     </div>
                 </div>
 
                 <!-- Frontend Images Settings Tab -->
                 <div id="settings-tab-front_images" class="settings-section">
-                    <h3 style="margin-bottom: 16px; color:var(--text-primary);">前台介面示意圖設定</h3>
-                    <p style="color:var(--text-secondary); font-size:13px; margin-bottom:20px;">可在此上傳「掃描區示意圖」及「放入還書口示意圖」。支援 PNG / JPG / GIF 檔案格式。</p>
+                    <h3 style="margin-bottom: 16px; color:var(--text-primary);">{{ t('admin.settings.front_images.title', '前台介面示意圖設定') }}</h3>
+                    <p style="color:var(--text-secondary); font-size:13px; margin-bottom:20px;">{{ t('admin.settings.front_images.desc', '可在此上傳「掃描區示意圖」及「放入還書口示意圖」。支援 PNG / JPG / GIF 檔案格式。') }}</p>
 
                     <div style="display:grid; grid-template-columns:1fr 1fr; gap:24px; align-items:flex-start;">
                         <div class="form-group">
-                            <label class="form-label">掃描區示意圖 (出現在「請將書本條碼放入掃描區」上方)</label>
+                            <label class="form-label">{{ t('admin.settings.front_images.scan_label', '掃描區示意圖 (出現在「請將書本條碼放入掃描區」上方)') }}</label>
                             <div style="margin-bottom:8px;">
-                                <img id="preview-scan-guide" src="" alt="掃描區示意圖預覽" style="max-width:100%; max-height:180px; border-radius:8px; border:1px solid var(--border-color); object-fit:contain; display:none;">
-                                <div id="preview-scan-guide-empty" style="color:var(--text-secondary); font-size:12px; padding:12px; border-radius:8px; border:1px dashed var(--border-color); text-align:center;">目前使用預設圖示（條碼 Icon）</div>
+                                <img id="preview-scan-guide" src="" alt="{{ t('admin.settings.front_images.scan_preview_alt', '掃描區示意圖預覽') }}" style="max-width:100%; max-height:180px; border-radius:8px; border:1px solid var(--border-color); object-fit:contain; display:none;">
+                                <div id="preview-scan-guide-empty" style="color:var(--text-secondary); font-size:12px; padding:12px; border-radius:8px; border:1px dashed var(--border-color); text-align:center;">{{ t('admin.settings.front_images.scan_empty', '目前使用預設圖示（條碼 Icon）') }}</div>
                             </div>
                             <input type="file" id="file-scan-guide" class="form-input" accept="image/png,image/jpeg,image/jpg,image/gif">
-                            <small style="color:var(--text-secondary);">建議解析度：約 800×300，實際顯示會等比例縮放。</small>
+                            <small style="color:var(--text-secondary);">{{ t('admin.settings.front_images.scan_hint', '建議解析度：約 800×300，實際顯示會等比例縮放。') }}</small>
                         </div>
 
                         <div class="form-group">
-                            <label class="form-label">放入還書口示意圖 (出現在「請將書本放入還書機內」中間)</label>
+                            <label class="form-label">{{ t('admin.settings.front_images.place_label', '放入還書口示意圖 (出現在「請將書本放入還書機內」中間)') }}</label>
                             <div style="margin-bottom:8px;">
-                                <img id="preview-place-book" src="" alt="放書示意圖預覽" style="max-width:100%; max-height:180px; border-radius:8px; border:1px solid var(--border-color); object-fit:contain; display:none;">
-                                <div id="preview-place-book-empty" style="color:var(--text-secondary); font-size:12px; padding:12px; border-radius:8px; border:1px dashed var(--border-color); text-align:center;">目前使用預設 SVG 示意圖</div>
+                                <img id="preview-place-book" src="" alt="{{ t('admin.settings.front_images.place_preview_alt', '放書示意圖預覽') }}" style="max-width:100%; max-height:180px; border-radius:8px; border:1px solid var(--border-color); object-fit:contain; display:none;">
+                                <div id="preview-place-book-empty" style="color:var(--text-secondary); font-size:12px; padding:12px; border-radius:8px; border:1px dashed var(--border-color); text-align:center;">{{ t('admin.settings.front_images.place_empty', '目前使用預設 SVG 示意圖') }}</div>
                             </div>
-                            <input type="file" id="file-place-book" class="form-input" accept="image/png,image/jpeg,image/jpg,image/gif">
-                            <small style="color:var(--text-secondary);">建議解析度：約 800×400，實際顯示會等比例縮放。</small>
+                            <input type="file" id="file-place-book" class="form-input" accept="image/png,image/jpeg,image/jpg,image/gif,image/svg+xml,.svg">
+                            <small style="color:var(--text-secondary);">{{ t('admin.settings.front_images.place_hint', '建議解析度：約 800×400，實際顯示會等比例縮放。') }}</small>
                         </div>
                     </div>
 
                     <div style="margin-top: 24px; display:flex; justify-content:flex-end; gap:12px;">
                         <button class="btn btn-secondary" style="background:#e0e5f2; color:#5f6c7b;" onclick="loadFrontImagesConfig()">
-                            <i class="fas fa-undo"></i> 重新載入目前設定
+                            <i class="fas fa-undo"></i> {{ t('admin.settings.front_images.reload', '重新載入目前設定') }}
                         </button>
                         <button class="btn btn-primary" onclick="saveFrontImages()">
-                            <i class="fas fa-save"></i> 上傳並儲存圖片
+                            <i class="fas fa-save"></i> {{ t('admin.settings.front_images.save', '上傳並儲存圖片') }}
                         </button>
                     </div>
                 </div>
@@ -846,11 +941,47 @@
     <div id="loading-overlay" style="display:none; position:fixed; inset:0; background:rgba(255,255,255,0.8); z-index:9999; align-items:center; justify-content:center; backdrop-filter: blur(2px);">
         <div style="text-align:center;">
             <i class="fas fa-spinner fa-spin" style="font-size: 32px; color: var(--primary-color);"></i>
-            <p style="margin-top: 12px; color: var(--text-secondary);">處理中...</p>
+            <p style="margin-top: 12px; color: var(--text-secondary);">{{ t('admin.loading', '處理中...') }}</p>
         </div>
     </div>
 
     <script>
+        const ADMIN_I18N = {
+            table_title_current: "{{ t('admin.table.current_title', '當前箱內列表') }}",
+            table_title_history: "{{ t('admin.table.history_title', '歷史還書列表') }}",
+            table_empty_current: "{{ t('admin.table.empty_current', '目前箱內無書籍') }}",
+            table_empty_history: "{{ t('admin.table.empty_history', '尚無歷史紀錄') }}",
+            table_header_status: "{{ t('admin.table.status', '狀態') }}",
+            table_header_clear_time: "{{ t('admin.table.clear_time', '取出時間') }}",
+            status_in_box: "{{ t('admin.table.in_box', '已入箱') }}",
+            status_taken: "{{ t('admin.table.taken', '已取出') }}",
+            confirm_clear_history: "{{ t('admin.confirm.clear_history', '確定要清空所有還書紀錄嗎？') }}",
+            confirm_clear_box: "{{ t('admin.confirm.clear_box', '確定要清空還書箱內容物嗎？') }}",
+            alert_history_cleared: "{{ t('admin.alert.history_cleared', '紀錄已清空') }}",
+            alert_box_cleared: "{{ t('admin.alert.box_cleared', '已清空內容物') }}",
+            alert_failed: "{{ t('admin.alert.failed', '失敗') }}",
+            alert_error: "{{ t('admin.alert.error', '錯誤') }}",
+            state_sleeping: "{{ t('admin.state.sleeping', '休眠') }}",
+            state_homing: "{{ t('admin.state.homing', '回原點中') }}",
+            state_homed: "{{ t('admin.state.homed', '就緒') }}",
+            state_opened: "{{ t('admin.state.opened', '開啟中') }}",
+            state_closed: "{{ t('admin.state.closed', '關閉') }}",
+            state_power_on_not_homed: "{{ t('admin.state.power_on_not_homed', '已上電(未回原點)') }}",
+            state_unavailable: "{{ t('admin.state.unavailable', '不可用') }}",
+            state_ready: "{{ t('admin.state.ready', '就緒') }}",
+            state_error: "{{ t('admin.state.error', '錯誤') }}",
+            state_unknown: "{{ t('admin.state.unknown', '未知') }}",
+            state_homing_text: "{{ t('admin.state.homing_text', '回原點中') }}",
+            state_homed_text: "{{ t('admin.state.homed_text', '機器已回原點並就緒') }}",
+            sub_homing: "{{ t('admin.state.sub_homing', '回原點中…') }}",
+            sub_homed: "{{ t('admin.state.sub_homed', '已回原點') }}",
+            log_sending: "{{ t('admin.machine.log_sending', '送出') }}",
+            log_recv: "{{ t('admin.machine.log_recv', '回應') }}",
+            log_error: "{{ t('admin.machine.log_error', '錯誤') }}",
+            log_exception: "{{ t('admin.machine.log_exception', '例外') }}",
+            log_ok: "{{ t('admin.machine.log_ok', 'OK') }}",
+            network_error: "{{ t('admin.machine.network_error', '無法連接伺服器 (NetworkError)。請檢查後端服務是否正在執行。') }}"
+        };
         // Tab Switching
         function switchTab(tabName) {
             // Hide all views
@@ -901,6 +1032,7 @@
             fetchUART();
             fetchLibraryConfig();
             fetchMachineParams();
+            fetchAdminAuth();
             resetIdleTimer();
         });
 
@@ -910,9 +1042,11 @@
             // Update buttons
             const btnCurrent = document.getElementById('btn-current-list');
             const btnHistory = document.getElementById('btn-history-list');
+            const btnClearHistory = document.getElementById('btn-clear-history');
             const title = document.getElementById('table-title');
             
             if(mode === 'current') {
+                if (btnClearHistory) btnClearHistory.style.display = 'none';
                 btnCurrent.classList.add('btn-primary');
                 btnCurrent.classList.remove('btn-secondary');
                 btnCurrent.style.background = ''; // reset inline style
@@ -923,8 +1057,9 @@
                 btnHistory.style.background = '#e0e5f2';
                 btnHistory.style.color = '#5f6c7b';
                 
-                title.textContent = '當前箱內列表';
+                title.textContent = ADMIN_I18N.table_title_current;
             } else {
+                if (btnClearHistory) btnClearHistory.style.display = 'inline-flex';
                 btnHistory.classList.add('btn-primary');
                 btnHistory.classList.remove('btn-secondary');
                 btnHistory.style.background = '';
@@ -935,7 +1070,7 @@
                 btnCurrent.style.background = '#e0e5f2';
                 btnCurrent.style.color = '#5f6c7b';
                 
-                title.textContent = '歷史還書列表';
+                title.textContent = ADMIN_I18N.table_title_history;
             }
             
             if(cachedData) renderLogs(cachedData);
@@ -979,8 +1114,12 @@
                 const res = await fetch('/api/status');
                 if (!res.ok) return;
                 const data = await res.json();
-                const limitEl = document.getElementById('total-limit');
-                if (limitEl && data.limit !== undefined) limitEl.textContent = data.limit;
+                const limitEl1 = document.getElementById('total-limit-1');
+                const limitEl2 = document.getElementById('total-limit-2');
+                if (data.limit !== undefined) {
+                    if (limitEl1) limitEl1.textContent = data.limit;
+                    if (limitEl2) limitEl2.textContent = data.limit;
+                }
 
                 // 更新機器狀態顯示（轉換為可讀文字）
                 const state = data.machine_state || 'unknown';
@@ -988,16 +1127,16 @@
                 const is_homed = !!data.is_homed;
 
                 const map = {
-                    sleeping: ['休眠', '#ffb547'],
-                    homing: ['回原點中', '#ffb547'],
-                    homed: ['就緒', '#2ecc71'],
-                    opened: ['開啟中', '#4361ee'],
-                    closed: ['關閉', '#a3aed0'],
-                    power_on_not_homed: ['已上電(未回原點)', '#ffb547'],
-                    unavailable: ['不可用', '#dc3545'],
-                    ready: ['就緒', '#2ecc71'],
-                    error: ['錯誤', '#dc3545'],
-                    unknown: ['未知', '#a3aed0']
+                    sleeping: [ADMIN_I18N.state_sleeping, '#ffb547'],
+                    homing: [ADMIN_I18N.state_homing, '#ffb547'],
+                    homed: [ADMIN_I18N.state_homed, '#2ecc71'],
+                    opened: [ADMIN_I18N.state_opened, '#4361ee'],
+                    closed: [ADMIN_I18N.state_closed, '#a3aed0'],
+                    power_on_not_homed: [ADMIN_I18N.state_power_on_not_homed, '#ffb547'],
+                    unavailable: [ADMIN_I18N.state_unavailable, '#dc3545'],
+                    ready: [ADMIN_I18N.state_ready, '#2ecc71'],
+                    error: [ADMIN_I18N.state_error, '#dc3545'],
+                    unknown: [ADMIN_I18N.state_unknown, '#a3aed0']
                 };
                 const label = (map[state] && map[state][0]) || '未知';
                 const color = (map[state] && map[state][1]) || '#a3aed0';
@@ -1013,8 +1152,8 @@
                     badge.style.color = color;
                 }
                 if (txt) {
-                    if (homing) txt.textContent = '回原點中';
-                    else if (is_homed) txt.textContent = '機器已回原點並就緒';
+                    if (homing) txt.textContent = ADMIN_I18N.state_homing_text;
+                    else if (is_homed) txt.textContent = ADMIN_I18N.state_homed_text;
                     else txt.textContent = '';
                 }
                 if (mini) {
@@ -1023,7 +1162,7 @@
                     mini.style.color = color;
                 }
                 if (sub) {
-                    sub.textContent = homing ? 'Homing…' : (is_homed ? 'Homed' : '');
+                    sub.textContent = homing ? ADMIN_I18N.sub_homing : (is_homed ? ADMIN_I18N.sub_homed : '');
                 }
             } catch (e) { console.error(e); }
         }
@@ -1061,13 +1200,34 @@
 
             const tbody = document.getElementById('logs-body');
             const emptyMsg = document.getElementById('empty-message');
-            const totalCount = document.getElementById('total-count');
+            const totalCount1 = document.getElementById('total-count-1');
+            const totalCount2 = document.getElementById('total-count-2');
             const todayTotal = document.getElementById('today-total');
             
             tbody.innerHTML = '';
             
-            // Stats always reflect CURRENT BOX count
-            if (totalCount) totalCount.textContent = currentLogs.length;
+            // Stats always reflect CURRENT BOX count (by bin)
+            let bin1 = 0;
+            let bin2 = 0;
+            if (data && data.bin_counts) {
+                bin1 = parseInt(data.bin_counts['1'] || 0, 10) || 0;
+                bin2 = parseInt(data.bin_counts['2'] || 0, 10) || 0;
+            } else {
+                currentLogs.forEach(l => {
+                    const b = l.target_bin;
+                    if (b === 1 || b === '1') {
+                        bin1 += 1;
+                    } else if (b === 2 || b === '2') {
+                        bin2 += 1;
+                    } else {
+                        const id = String(l.book_id || '').trim().toUpperCase();
+                        if (id.startsWith('C') || id.startsWith('G')) bin1 += 1;
+                        else bin2 += 1;
+                    }
+                });
+            }
+            if (totalCount1) totalCount1.textContent = bin1;
+            if (totalCount2) totalCount2.textContent = bin2;
             
             if (todayTotal) {
                 if (data.today_total !== undefined) {
@@ -1082,7 +1242,7 @@
 
             if (displayLogs.length === 0) {
                 emptyMsg.style.display = 'block';
-                emptyMsg.querySelector('p').textContent = currentViewMode === 'current' ? '目前箱內無書籍' : '尚無歷史紀錄';
+                emptyMsg.querySelector('p').textContent = currentViewMode === 'current' ? ADMIN_I18N.table_empty_current : ADMIN_I18N.table_empty_history;
             } else {
                 emptyMsg.style.display = 'none';
             }
@@ -1090,9 +1250,9 @@
             // Update table header based on mode
             const statusHeader = document.getElementById('header-status-or-clear-time');
             if (currentViewMode === 'history') {
-                statusHeader.textContent = '取出時間';
+                statusHeader.textContent = ADMIN_I18N.table_header_clear_time;
             } else {
-                statusHeader.textContent = '狀態';
+                statusHeader.textContent = ADMIN_I18N.table_header_status;
             }
 
             displayLogs.forEach(log => {
@@ -1100,13 +1260,13 @@
                 
                 let lastColumnContent = '';
                 if (currentViewMode === 'current') {
-                    lastColumnContent = '<span class="status-badge">已入箱</span>';
+                    lastColumnContent = `<span class="status-badge">${ADMIN_I18N.status_in_box}</span>`;
                 } else {
                     // For history, show clear_time if available, else show badge
                     if (log.clear_time) {
                         lastColumnContent = `<span style="color:var(--text-secondary); font-size:13px;">${log.clear_time}</span>`;
                     } else {
-                        lastColumnContent = '<span class="status-badge" style="background:rgba(163, 174, 208, 0.1); color:#a3aed0;">已取出</span>';
+                        lastColumnContent = `<span class="status-badge" style="background:rgba(163, 174, 208, 0.1); color:#a3aed0;">${ADMIN_I18N.status_taken}</span>`;
                     }
                 }
 
@@ -1122,30 +1282,30 @@
         }
 
         async function clearHistory() {
-            if (!confirm('確定要清空所有還書紀錄嗎？')) return;
+            if (!confirm(ADMIN_I18N.confirm_clear_history)) return;
             showLoading(true);
             try {
                 const res = await fetch('/api/admin/clear_history', { method: 'POST' });
                 const json = await res.json();
                 if(json.success) {
-                    alert('紀錄已清空');
+                    alert(ADMIN_I18N.alert_history_cleared);
                     fetchLogs();
-                } else alert('失敗');
-            } catch(e) { alert('Error'); }
+                } else alert(ADMIN_I18N.alert_failed);
+            } catch(e) { alert(ADMIN_I18N.alert_error); }
             showLoading(false);
         }
 
         async function clearBox() {
-            if (!confirm('確定要清空還書箱內容物嗎？')) return;
+            if (!confirm(ADMIN_I18N.confirm_clear_box)) return;
             showLoading(true);
             try {
                 const res = await fetch('/api/admin/clear_box', { method: 'POST' });
                 const json = await res.json();
                 if(json.success) {
-                    alert('已清空內容物');
+                    alert(ADMIN_I18N.alert_box_cleared);
                     fetchLogs();
-                } else alert('失敗');
-            } catch(e) { alert('Error'); }
+                } else alert(ADMIN_I18N.alert_failed);
+            } catch(e) { alert(ADMIN_I18N.alert_error); }
             showLoading(false);
         }
 
@@ -1159,7 +1319,7 @@
             buttons.forEach(btn => btn.disabled = true);
             if(customInput) customInput.disabled = true;
 
-            respEl.value += `\n> Sending: ${cmd}...`;
+            respEl.value += `\n> ${ADMIN_I18N.log_sending}: ${cmd}...`;
             respEl.scrollTop = respEl.scrollHeight;
 
             try {
@@ -1180,18 +1340,18 @@
                 const time = new Date().toLocaleTimeString();
                 
                 if (j.success) {
-                    respEl.value += `\n[${time}] RECV: ${j.response || 'OK'}`;
+                    respEl.value += `\n[${time}] ${ADMIN_I18N.log_recv}: ${j.response || ADMIN_I18N.log_ok}`;
                 } else {
-                    respEl.value += `\n[${time}] ERROR: ${j.message}`;
+                    respEl.value += `\n[${time}] ${ADMIN_I18N.log_error}: ${j.message}`;
                 }
                 respEl.scrollTop = respEl.scrollHeight;
             } catch (e) {
                 console.error(e);
                 let msg = e.toString();
                 if (e.name === 'TypeError' && e.message.includes('NetworkError')) {
-                    msg = "無法連接伺服器 (NetworkError)。請檢查後端服務是否正在執行。";
+                    msg = ADMIN_I18N.network_error;
                 }
-                respEl.value += `\nEXCEPTION: ${msg}`;
+                respEl.value += `\n${ADMIN_I18N.log_exception}: ${msg}`;
                 respEl.scrollTop = respEl.scrollHeight;
             } finally {
                 // 解鎖所有按鈕與輸入
@@ -1270,6 +1430,29 @@
                 showLoadingOverlay(false);
             }
         }
+
+        // 當使用者選擇本機檔案時即時顯示預覽（支援 PNG/JPG/GIF/SVG）
+        (function(){
+            const filePlaceInput = document.getElementById('file-place-book');
+            const placeImg = document.getElementById('preview-place-book');
+            const placeEmpty = document.getElementById('preview-place-book-empty');
+            if (!filePlaceInput) return;
+            filePlaceInput.addEventListener('change', function(){
+                const f = this.files[0];
+                if (!f) {
+                    if (placeImg) { placeImg.src = ''; placeImg.style.display = 'none'; }
+                    if (placeEmpty) placeEmpty.style.display = 'block';
+                    return;
+                }
+
+                const url = URL.createObjectURL(f);
+                if (placeImg) {
+                    placeImg.src = url;
+                    placeImg.style.display = 'block';
+                }
+                if (placeEmpty) placeEmpty.style.display = 'none';
+            });
+        })();
 
         function showLoadingOverlay(show) {
             const overlay = document.getElementById('loading-overlay');
@@ -1473,6 +1656,89 @@
             } catch(e) {}
         }
 
+        async function fetchAdminAuth() {
+            try {
+                const res = await fetch('/api/admin/get_admin_auth');
+                if (!res.ok) return;
+                const data = await res.json();
+                if (data.success) {
+                    if (data.require_admin_login !== undefined) {
+                        document.getElementById('settings-require-admin-login').checked = !!data.require_admin_login;
+                    }
+                    if (data.admin_username !== undefined) {
+                        document.getElementById('settings-admin-username').value = data.admin_username || '';
+                    }
+                    const pwd1 = document.getElementById('settings-admin-password');
+                    const pwd2 = document.getElementById('settings-admin-password-confirm');
+                    if (pwd1) pwd1.value = '';
+                    if (pwd2) pwd2.value = '';
+                }
+            } catch (e) {}
+        }
+
+        function togglePasswordVisibility(inputId, btnId) {
+            const input = document.getElementById(inputId);
+            const btn = document.getElementById(btnId);
+            if (!input || !btn) return;
+            const icon = btn.querySelector('i');
+            if (input.type === 'password') {
+                input.type = 'text';
+                if (icon) icon.className = 'fas fa-eye-slash';
+            } else {
+                input.type = 'password';
+                if (icon) icon.className = 'fas fa-eye';
+            }
+        }
+
+        async function saveAdminAuthSettings() {
+            showLoading(true);
+            const requireAdminLogin = document.getElementById('settings-require-admin-login').checked;
+            const adminUsername = document.getElementById('settings-admin-username').value.trim();
+            const adminPassword = document.getElementById('settings-admin-password').value;
+            const adminPasswordConfirm = document.getElementById('settings-admin-password-confirm').value;
+
+            if (!adminUsername) {
+                alert('管理員帳號不可為空');
+                showLoading(false);
+                return;
+            }
+
+            // 有要改密碼時，兩次必須一致
+            if ((adminPassword || adminPasswordConfirm) && adminPassword !== adminPasswordConfirm) {
+                alert('兩次輸入的管理員密碼不一致，請重新確認。');
+                showLoading(false);
+                return;
+            }
+
+            try {
+                const authRes = await fetch('/api/admin/set_admin_auth', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        require_admin_login: requireAdminLogin,
+                        admin_username: adminUsername,
+                        admin_password: adminPassword
+                    })
+                });
+                if (!authRes.ok) {
+                    const err = await authRes.json().catch(() => ({}));
+                    throw new Error(err.message || '後台登入設定儲存失敗');
+                }
+
+                alert('管理員帳號設定已儲存。');
+                fetchAdminAuth();
+            } catch (e) {
+                const msg = (e && e.message) ? e.message : String(e);
+                if (msg.includes('未登入') || msg.includes('Unauthorized') || msg.includes('401')) {
+                    alert('儲存失敗：目前登入狀態已失效，請重新登入後再儲存。');
+                    window.location.href = '/login';
+                    return;
+                }
+                alert('儲存失敗: ' + msg);
+            }
+            showLoading(false);
+        }
+
         async function saveSettings() {
             showLoading(true);
             const limit = parseInt(document.getElementById('settings-limit').value);
@@ -1501,18 +1767,26 @@
 
             try {
                 // 1. Machine Params (Limit + Book Check)
-                await fetch('/api/admin/set_machine_params', {
+                const machineRes = await fetch('/api/admin/set_machine_params', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({ limit, book_check_enabled: bookCheck })
                 });
+                if (!machineRes.ok) {
+                    const err = await machineRes.json().catch(() => ({}));
+                    throw new Error(err.message || '機器參數儲存失敗');
+                }
                 
                 // 2. UART
-                await fetch('/api/admin/set_uart', {
+                const uartRes = await fetch('/api/admin/set_uart', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({ port, baudrate: baud })
                 });
+                if (!uartRes.ok) {
+                    const err = await uartRes.json().catch(() => ({}));
+                    throw new Error(err.message || 'UART 設定儲存失敗');
+                }
 
                 // 3. Library
                 const libRes = await fetch('/api/admin/set_library_config', {
@@ -1561,7 +1835,13 @@
                 alert(msg);
                 fetchStatus();
             } catch(e) {
-                alert('儲存失敗: ' + e.message);
+                const msg = (e && e.message) ? e.message : String(e);
+                if (msg.includes('未登入') || msg.includes('Unauthorized') || msg.includes('401')) {
+                    alert('儲存失敗：目前登入狀態已失效，請重新登入後再儲存。');
+                    window.location.href = '/login';
+                    return;
+                }
+                alert('儲存失敗: ' + msg);
             }
             showLoading(false);
         }

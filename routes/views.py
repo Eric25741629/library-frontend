@@ -24,13 +24,15 @@ def index():
 def login():
     """管理員登入"""
     if request.method == 'POST':
-        data = request.json
+        data = request.json or {}
+        username = (data.get('username') or '').strip()
         password = data.get('password')
-        if password == shared.ADMIN_PASSWORD:
+        expect_user = getattr(shared, 'ADMIN_USERNAME', 'admin')
+        if username == expect_user and password == shared.ADMIN_PASSWORD:
             session.permanent = True
             session['logged_in'] = True
             return jsonify({"success": True})
-        return jsonify({"success": False, "message": "密碼錯誤"})
+        return jsonify({"success": False, "message": "帳號或密碼錯誤"})
     return render_template('login.html', barcode_login_enabled=shared.BARCODE_LOGIN_ENABLED)
 
 @views_bp.route('/logout')
@@ -38,6 +40,14 @@ def logout():
     """管理員登出"""
     session.pop('logged_in', None)
     return redirect(url_for('views.index'))
+
+@views_bp.route('/set-lang/<lang>')
+def set_lang(lang):
+    """切換語言"""
+    if lang not in shared.LOCALES:
+        lang = shared.DEFAULT_LANG or 'zh-TW'
+    session['lang'] = lang
+    return redirect(request.referrer or url_for('views.index'))
 
 @views_bp.route('/admin')
 def admin():
