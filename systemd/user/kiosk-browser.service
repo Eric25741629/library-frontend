@@ -1,0 +1,27 @@
+# /home/ros/.config/systemd/user/kiosk-browser.service
+
+
+[Unit]
+
+Description=Firefox Auto (restart on crash)
+
+Wants=pyserver.service
+
+After=pyserver.service
+
+
+
+[Service]
+
+Type=simple
+
+ExecStart=/bin/bash /home/ros/bin/start_browser_after_server.sh
+Restart=always
+
+RestartSec=2
+
+
+
+[Install]
+
+WantedBy=default.target

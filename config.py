@@ -11,7 +11,7 @@ if cfg_file.exists():
         _cfg = {}
 
 # 預設值與對外變數 (向後相容)
-VERSION = "0.9.1"
+VERSION = "0.9.3beta"
 ADMIN_USERNAME = _cfg.get('admin_username', 'admin')
 ADMIN_PASSWORD = _cfg.get('admin_password', 'admin')
 BARCODE_LOGIN_ENABLED = bool(_cfg.get('barcode_login_enabled', True))

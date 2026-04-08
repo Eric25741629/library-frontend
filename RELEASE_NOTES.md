@@ -1,3 +1,20 @@
+# Release: 0.9.3 beta
+
+發布日期: 2026-04-08
+
+狀態: Beta（安裝與部署流程調整中）
+
+重點說明：
+- 新增 `install_user_services.sh`，可同時安裝 systemd user services 與 `requirements.txt` 內的 Python 依賴。
+- 新增安裝選項，支援只安裝 services、只安裝 Python 依賴，或略過 Python 依賴。
+- 補充 README 的安裝前需求、第一次部署步驟與一鍵安裝說明，讓其他人更容易照流程部署。
+
+已知風險/注意事項：
+- `kiosk-browser.service` 與 `pyserver.service` 內容仍使用固定路徑，若其他人安裝到不同使用者或不同目錄，需先調整 service 內路徑。
+- 安裝 Python 依賴時需要可用的 `python3` 與 `pip`，且多半需要連網。
+
+---
+
 # Release: 0.9.1
 
 發布日期: 2026-03-03

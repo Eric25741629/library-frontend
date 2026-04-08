@@ -1,0 +1,29 @@
+# /home/ros/.config/systemd/user/pyserver.service
+
+[Unit]
+
+Description=Python Server (Flask) - autostart
+
+After=network-online.target
+
+Wants=network-online.target
+
+
+
+[Service]
+
+Type=simple
+
+WorkingDirectory=/home/ros/下載/圖書館-前端
+
+ExecStart=/usr/bin/python3 /home/ros/下載/圖書館-前端/app.py
+
+Restart=on-failure
+
+RestartSec=2
+
+
+
+[Install]
+
+WantedBy=default.target

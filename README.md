@@ -61,6 +61,55 @@ flask run --host=0.0.0.0 --port=5000
 ```
 - 編輯 `config.yml` 後重啟服務以套用設定（例如 `book_check_enabled`, `machine.port`）。
 
+**安裝前需求**
+- Linux 環境，且可使用 `systemctl --user`
+- 已安裝 `python3` 與 `pip`
+- 目標使用者可寫入 `~/.config/systemd/user/`
+- 若要安裝 Python 依賴，需可連網或已準備離線套件來源
+- 若要啟用瀏覽器 kiosk 模式，系統需已存在對應的 Firefox 與圖形桌面環境
+
+**第一次部署步驟**
+1. 將專案放到正確位置，並確認 `requirements.txt`、`systemd/user/*.service`、`install_user_services.sh` 都在 repo 內。
+2. 進入專案目錄，執行：
+```bash
+./install_user_services.sh
+```
+3. 腳本會安裝 Python 依賴，並把 service 複製到使用者的 `~/.config/systemd/user/`。
+4. 確認服務狀態：
+```bash
+systemctl --user status pyserver.service
+systemctl --user status kiosk-browser.service
+```
+5. 若需重新載入設定或重裝：
+```bash
+systemctl --user daemon-reload
+systemctl --user restart pyserver.service kiosk-browser.service
+```
+
+**一鍵安裝（建議）**
+
+專案內提供 `install_user_services.sh`，可同時安裝 systemd user services 與 Python 依賴。
+
+```bash
+# 全部安裝
+./install_user_services.sh
+
+# 只安裝 service
+./install_user_services.sh --services-only
+
+# 只安裝 Python 依賴
+./install_user_services.sh --python-only
+
+# 略過 Python 依賴，只做 service
+./install_user_services.sh --skip-python-deps
+```
+
+安裝後會把以下服務複製到使用者的 `~/.config/systemd/user/` 並啟用：
+- `pyserver.service`
+- `kiosk-browser.service`
+
+Python 依賴則會依照 `requirements.txt` 安裝。
+
 **注意事項與建議**
 - 請不要把 `return_box.db` 上傳到 public repository；若要上傳至內部 GitLab，請先確認是否需過濾或匿名化敏感資料。
 - 若需回滾敏感檔案（從 commit 歷史移除），請在上傳前通知，我可協助使用 `git filter-repo` 進行清理。
