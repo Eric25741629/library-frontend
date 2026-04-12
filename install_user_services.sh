@@ -27,6 +27,30 @@ usage() {
 EOF
 }
 
+print_user_bus_reminder() {
+  cat <<EOF
+[REMINDER]
+systemctl --user 需要該使用者的登入 session / user bus。
+如果你是在沒有 GUI 登入、沒有 SSH 持續 session、或剛切換使用者後直接執行，
+就可能出現：Failed to connect to bus: No such file or directory
+
+建議做法：
+  1. 以目標使用者登入後再執行本腳本
+  2. 或先啟用 linger：sudo loginctl enable-linger $(id -un)
+  3. 若只是要安裝 Python 套件，可使用 --python-only
+
+EOF
+}
+
+check_user_bus() {
+  if systemctl --user show-environment >/dev/null 2>&1; then
+    return 0
+  fi
+
+  print_user_bus_reminder
+  return 1
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --services-only)
@@ -101,6 +125,7 @@ set -euo pipefail
 
 URL="http://127.0.0.1:5000/"
 BROWSER_BIN="${BROWSER_BIN:-firefox}"
+WINDOW_CLASS="${WINDOW_CLASS:-firefox.Firefox}"
 
 wait_for_server() {
   local timeout=60
@@ -115,9 +140,59 @@ wait_for_server() {
 
 wait_for_server || true
 
+is_fullscreen() {
+  local win_id="$1"
+  xprop -id "${win_id}" _NET_WM_STATE 2>/dev/null | grep -q "_NET_WM_STATE_FULLSCREEN"
+}
+
+find_browser_window() {
+  wmctrl -lx 2>/dev/null | awk -v cls="${WINDOW_CLASS}" '$3 == cls {print $1; exit}'
+}
+
+wait_browser_window() {
+  local max_wait=50
+  local i win_id
+  for i in $(seq 1 "${max_wait}"); do
+    win_id="$(find_browser_window || true)"
+    if [[ -n "${win_id}" ]]; then
+      echo "${win_id}"
+      return 0
+    fi
+    sleep 0.1
+  done
+  return 1
+}
+
+watch_fullscreen() {
+  local browser_pid="$1"
+  local win_id=""
+
+  win_id="$(wait_browser_window || true)"
+  if [[ -z "${win_id}" ]]; then
+    kill "${browser_pid}" 2>/dev/null || true
+    return 0
+  fi
+
+  while kill -0 "${browser_pid}" 2>/dev/null; do
+    if ! is_fullscreen "${win_id}"; then
+      # Leave fullscreen -> immediately restart browser to avoid showing desktop.
+      kill "${browser_pid}" 2>/dev/null || true
+      return 0
+    fi
+    sleep 0.2
+  done
+}
+
 while true; do
-  "${BROWSER_BIN}" --kiosk "${URL}" || true
-  sleep 0.5
+  if command -v wmctrl >/dev/null 2>&1 && command -v xprop >/dev/null 2>&1; then
+    "${BROWSER_BIN}" --kiosk "${URL}" &
+    browser_pid="$!"
+    watch_fullscreen "${browser_pid}"
+    wait "${browser_pid}" 2>/dev/null || true
+  else
+    "${BROWSER_BIN}" --kiosk "${URL}" || true
+  fi
+  sleep 0.1
 done
 EOF
   chmod +x "${HELPER_SCRIPT}"
@@ -132,6 +207,17 @@ install_systemd_services() {
   if [[ ! -f "${SRC_DIR}/${BROWSER_SERVICE}" ]]; then
     echo "[ERROR] 找不到 ${SRC_DIR}/${BROWSER_SERVICE}"
     exit 1
+  fi
+
+  if ! check_user_bus; then
+    echo "[WARN] 偵測不到可用的 systemd user bus，略過服務安裝。"
+    echo "[WARN] 你可以先登入目標使用者再重跑，或執行：sudo loginctl enable-linger $(id -un)"
+    return 1
+  fi
+
+  if ! command -v wmctrl >/dev/null 2>&1 || ! command -v xprop >/dev/null 2>&1; then
+    echo "[WARN] 缺少 wmctrl 或 xprop，將無法監測離開全螢幕。"
+    echo "[WARN] 請先安裝：sudo apt-get install -y wmctrl x11-utils"
   fi
 
   mkdir -p "${DEST_DIR}"

@@ -5,7 +5,6 @@ set -euo pipefail
 # Ubuntu 20.04 Kiosk Full Setup Script
 # - GDM autologin kiosk (Xorg)
 # - Kiosk X Session (matchbox) that runs Flask + Firefox --kiosk
-# - Hardening: disable Ctrl+Alt+Del, tty2-tty6, sysrq, power keys
 # - Copy project into /home/kiosk/下載/圖書館-前端
 # - Optional ACL for ros to edit /home/kiosk via VS Code
 # =========================================================
@@ -34,11 +33,11 @@ need_root() {
 log() { printf "\n\033[1m%s\033[0m\n" "$*"; }
 
 ensure_pkg() {
-  log "安裝必要套件（firefox/curl/matchbox/unclutter/xset/acl）"
+  log "安裝必要套件（firefox/curl/matchbox/unclutter/xset/wmctrl/xprop/acl）"
   apt-get update -y
   apt-get install -y \
     firefox curl \
-    matchbox-window-manager unclutter x11-xserver-utils \
+    matchbox-window-manager unclutter x11-xserver-utils x11-utils wmctrl \
     acl
 }
 
@@ -158,9 +157,59 @@ for i in \$(seq 1 "\${WAIT_TIMEOUT}"); do
 done
 
 # Firefox：被關掉/崩潰就立刻拉回來
+is_fullscreen() {
+  local win_id="\$1"
+  xprop -id "\${win_id}" _NET_WM_STATE 2>/dev/null | grep -q "_NET_WM_STATE_FULLSCREEN"
+}
+
+find_browser_window() {
+  wmctrl -lx 2>/dev/null | awk '$3 == "firefox.Firefox" {print $1; exit}'
+}
+
+wait_browser_window() {
+  local max_wait=50
+  local i win_id
+  for i in \$(seq 1 "\${max_wait}"); do
+    win_id="\$(find_browser_window || true)"
+    if [[ -n "\${win_id}" ]]; then
+      echo "\${win_id}"
+      return 0
+    fi
+    sleep 0.1
+  done
+  return 1
+}
+
+watch_fullscreen() {
+  local browser_pid="\$1"
+  local win_id=""
+
+  win_id="\$(wait_browser_window || true)"
+  if [[ -z "\${win_id}" ]]; then
+    kill "\${browser_pid}" 2>/dev/null || true
+    return 0
+  fi
+
+  while kill -0 "\${browser_pid}" 2>/dev/null; do
+    if ! is_fullscreen "\${win_id}"; then
+      # Leave fullscreen -> immediately restart browser to avoid showing desktop.
+      kill "\${browser_pid}" 2>/dev/null || true
+      return 0
+    fi
+    sleep 0.2
+  done
+}
+
 while true; do
-  ${BROWSER_BIN} ${BROWSER_ARGS[*]} "\${URL}" || true
-  sleep 0.5
+  if command -v wmctrl >/dev/null 2>&1 && command -v xprop >/dev/null 2>&1; then
+    ${BROWSER_BIN} ${BROWSER_ARGS[*]} "\${URL}" &
+    browser_pid="\$!"
+    watch_fullscreen "\${browser_pid}"
+    wait "\${browser_pid}" 2>/dev/null || true
+  else
+    ${BROWSER_BIN} ${BROWSER_ARGS[*]} "\${URL}" || true
+  fi
+  sleep 0.1
 done
 EOF
 
@@ -173,35 +222,6 @@ Session=kiosk
 EOF
   chown "${TARGET_USER}:${TARGET_USER}" "/home/${TARGET_USER}/.dmrc"
   chmod 644 "/home/${TARGET_USER}/.dmrc"
-}
-
-harden_lockdown() {
-  log "加固鎖定：禁 Ctrl+Alt+Del / 禁 tty2~tty6 / 禁 SysRq / 電源鍵忽略"
-
-  # Ctrl+Alt+Del
-  systemctl mask ctrl-alt-del.target >/dev/null 2>&1 || true
-  systemctl daemon-reload >/dev/null 2>&1 || true
-
-  # 禁 tty2~tty6（保留 tty1 方便救援）
-  systemctl mask \
-    getty@tty2.service getty@tty3.service getty@tty4.service \
-    getty@tty5.service getty@tty6.service >/dev/null 2>&1 || true
-
-  # 禁 SysRq（避免 REISUB）
-  echo 'kernel.sysrq = 0' > /etc/sysctl.d/99-kiosk.conf
-  sysctl --system >/dev/null 2>&1 || true
-
-  # 電源鍵/睡眠鍵忽略（避免跳出關機 UI）
-  sed -i '/^HandlePowerKey=/d;/^HandleRebootKey=/d;/^HandleSuspendKey=/d;/^HandleHibernateKey=/d;/^HandleLidSwitch=/d' /etc/systemd/logind.conf
-  cat >> /etc/systemd/logind.conf <<'EOF'
-
-HandlePowerKey=ignore
-HandleRebootKey=ignore
-HandleSuspendKey=ignore
-HandleHibernateKey=ignore
-HandleLidSwitch=ignore
-EOF
-  systemctl restart systemd-logind >/dev/null 2>&1 || true
 }
 
 optional_acl_for_ros() {
@@ -226,7 +246,6 @@ print_summary() {
   echo "若要維修（建議用 ros SSH / VS Code）："
   echo "  - 專案路徑：${TARGET_PROJECT_DIR}"
   echo "  - kiosk session 腳本：/usr/local/bin/kiosk-session.sh"
-  echo "  - 如需暫時解除 tty 封鎖：sudo systemctl unmask getty@tty2.service ...（或進救援模式）"
 }
 
 main() {
@@ -239,7 +258,6 @@ main() {
   set_gdm_autologin
   copy_project "${src}"
   ensure_kiosk_session
-  harden_lockdown
   optional_acl_for_ros
   print_summary
 }

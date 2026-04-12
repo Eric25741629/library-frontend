@@ -7,6 +7,7 @@
 重點說明：
 - 修正 `pyserver.service` 與 `kiosk-browser.service` 的硬編碼路徑，安裝時會依目前使用者與專案實際路徑自動渲染。
 - `install_user_services.sh` 會自動產生使用者家目錄下的 kiosk browser helper，降低跨機器部署失敗機率。
+- `install_user_services.sh` 會在找不到 `systemd --user` bus 時輸出明確提醒，避免在沒有登入 session 的情況下安裝服務而直接失敗。
 - 保留既有日誌分資料夾機制，並提醒遷移後需確保 [logs/](logs/) 目錄對執行者可寫。
 
 已知風險/注意事項：

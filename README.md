@@ -63,6 +63,7 @@ flask run --host=0.0.0.0 --port=5000
 
 **安裝前需求**
 - Linux 環境，且可使用 `systemctl --user`
+- `systemctl --user` 必須在目標使用者的登入 session / user bus 可用時執行；若看到 `Failed to connect to bus: No such file or directory`，請先登入該使用者再安裝，或先執行 `sudo loginctl enable-linger <user>`
 - 已安裝 `python3` 與 `pip`
 - 目標使用者可寫入 `~/.config/systemd/user/`
 - 若要安裝 Python 依賴，需可連網或已準備離線套件來源
