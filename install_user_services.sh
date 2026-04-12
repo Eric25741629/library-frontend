@@ -5,6 +5,10 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SRC_DIR="${ROOT_DIR}/systemd/user"
 DEST_DIR="${HOME}/.config/systemd/user"
 REQ_FILE="${ROOT_DIR}/requirements.txt"
+USER_HOME="${HOME}"
+PROJECT_DIR="${ROOT_DIR}"
+HELPER_DIR="${USER_HOME}/bin"
+HELPER_SCRIPT="${HELPER_DIR}/start_browser_after_server.sh"
 
 PY_SERVICE="pyserver.service"
 BROWSER_SERVICE="kiosk-browser.service"
@@ -69,6 +73,56 @@ install_python_deps() {
   python3 -m pip install --user -r "${REQ_FILE}"
 }
 
+render_template() {
+  local src_file="$1"
+  local dest_file="$2"
+
+  python3 - "$src_file" "$dest_file" "$PROJECT_DIR" "$USER_HOME" <<'PY'
+from pathlib import Path
+import sys
+
+src = Path(sys.argv[1])
+dest = Path(sys.argv[2])
+project_dir = sys.argv[3]
+user_home = sys.argv[4]
+
+text = src.read_text(encoding='utf-8')
+text = text.replace('__PROJECT_DIR__', project_dir)
+text = text.replace('__HOME__', user_home)
+dest.write_text(text, encoding='utf-8')
+PY
+}
+
+install_browser_helper() {
+  mkdir -p "${HELPER_DIR}"
+  cat > "${HELPER_SCRIPT}" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+URL="http://127.0.0.1:5000/"
+BROWSER_BIN="${BROWSER_BIN:-firefox}"
+
+wait_for_server() {
+  local timeout=60
+  for _ in $(seq 1 "${timeout}"); do
+    if curl -fsS "${URL}" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
+wait_for_server || true
+
+while true; do
+  "${BROWSER_BIN}" --kiosk "${URL}" || true
+  sleep 0.5
+done
+EOF
+  chmod +x "${HELPER_SCRIPT}"
+}
+
 install_systemd_services() {
   if [[ ! -f "${SRC_DIR}/${PY_SERVICE}" ]]; then
     echo "[ERROR] 找不到 ${SRC_DIR}/${PY_SERVICE}"
@@ -81,8 +135,9 @@ install_systemd_services() {
   fi
 
   mkdir -p "${DEST_DIR}"
-  cp -f "${SRC_DIR}/${PY_SERVICE}" "${DEST_DIR}/${PY_SERVICE}"
-  cp -f "${SRC_DIR}/${BROWSER_SERVICE}" "${DEST_DIR}/${BROWSER_SERVICE}"
+  install_browser_helper
+  render_template "${SRC_DIR}/${PY_SERVICE}" "${DEST_DIR}/${PY_SERVICE}"
+  render_template "${SRC_DIR}/${BROWSER_SERVICE}" "${DEST_DIR}/${BROWSER_SERVICE}"
 
   systemctl --user daemon-reload
   systemctl --user enable --now "${PY_SERVICE}" "${BROWSER_SERVICE}"

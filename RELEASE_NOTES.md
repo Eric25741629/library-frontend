@@ -1,3 +1,20 @@
+# Release: 0.9.4
+
+發布日期: 2026-04-12
+
+狀態: Stable / Deployment fix
+
+重點說明：
+- 修正 `pyserver.service` 與 `kiosk-browser.service` 的硬編碼路徑，安裝時會依目前使用者與專案實際路徑自動渲染。
+- `install_user_services.sh` 會自動產生使用者家目錄下的 kiosk browser helper，降低跨機器部署失敗機率。
+- 保留既有日誌分資料夾機制，並提醒遷移後需確保 [logs/](logs/) 目錄對執行者可寫。
+
+已知風險/注意事項：
+- 遷移到新電腦時，需重新執行 `install_user_services.sh` 以套用新的使用者與路徑。
+- 若舊環境殘留 root 擁有的 [logs/](logs/) 或專案檔案，仍可能造成啟動失敗，請先修正權限。
+
+---
+
 # Release: 0.9.3 beta
 
 發布日期: 2026-04-08

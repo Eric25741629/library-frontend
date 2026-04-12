@@ -1,4 +1,5 @@
-# /home/ros/.config/systemd/user/pyserver.service
+# User systemd unit for the Flask server.
+# Paths are rendered at install time so the service can be moved across machines/users.
 
 [Unit]
 
@@ -14,9 +15,9 @@ Wants=network-online.target
 
 Type=simple
 
-WorkingDirectory=/home/ros/下載/圖書館-前端
+WorkingDirectory=__PROJECT_DIR__
 
-ExecStart=/usr/bin/python3 /home/ros/下載/圖書館-前端/app.py
+ExecStart=/usr/bin/python3 __PROJECT_DIR__/app.py
 
 Restart=on-failure
 

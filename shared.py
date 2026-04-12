@@ -29,7 +29,7 @@ LOCALES_DIR = BASE_DIR / 'locales'
 # 介面版本：修改前後端行為時請同步更新，供後台顯示
 # 介面版本：修改前後端行為時請同步更新，供後台顯示
 # 目前釋出版本
-APP_VERSION = "0.9.3beta"
+APP_VERSION = "0.9.4"
 
 cfg = {}
 MAX_RETURN_LIMIT = 20

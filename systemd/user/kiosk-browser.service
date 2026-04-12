@@ -1,4 +1,5 @@
-# /home/ros/.config/systemd/user/kiosk-browser.service
+# User systemd unit for the kiosk browser.
+# The helper script path is rendered at install time.
 
 
 [Unit]
@@ -15,7 +16,7 @@ After=pyserver.service
 
 Type=simple
 
-ExecStart=/bin/bash /home/ros/bin/start_browser_after_server.sh
+ExecStart=/bin/bash __HOME__/bin/start_browser_after_server.sh
 Restart=always
 
 RestartSec=2
