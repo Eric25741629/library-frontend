@@ -126,9 +126,10 @@ set -euo pipefail
 
 DISPLAY_VALUE="${DISPLAY:-:0}"
 TIMEOUT="${1:-180}"
+DISPLAY_NUM="${DISPLAY_VALUE#:}"
 
 is_ready() {
-  [[ -S "/tmp/.X11-unix/${DISPLAY_VALUE#:}" ]]
+  [[ -S "/tmp/.X11-unix/X${DISPLAY_NUM}" ]]
 }
 
 for _ in $(seq 1 "${TIMEOUT}"); do
@@ -151,6 +152,7 @@ set -euo pipefail
 URL="http://127.0.0.1:5000/"
 BROWSER_BIN="${BROWSER_BIN:-firefox}"
 WINDOW_CLASS="${WINDOW_CLASS:-firefox.Firefox}"
+export DISPLAY="${DISPLAY:-:0}"
 
 "${HOME}/bin/wait_gui_ready.sh" 180 || true
 
