@@ -549,6 +549,9 @@
                     <span style="align-self:center; color: var(--text-secondary); font-size: 13px; margin-right: 8px;">
                         {{ t('admin.version', '版本：') }}{{ app_version or 'unknown' }}
                     </span>
+                    <button class="btn btn-warning" onclick="stopFrontend()">
+                        <i class="fas fa-display"></i> {{ t('admin.stop_frontend', '關閉前端介面') }}
+                    </button>
                     <button class="btn btn-danger" onclick="clearBox()">
                         <i class="fas fa-trash-alt"></i> {{ t('admin.clear_box', '清空還書箱') }}
                     </button>
@@ -1307,6 +1310,24 @@
                 } else alert(ADMIN_I18N.alert_failed);
             } catch(e) { alert(ADMIN_I18N.alert_error); }
             showLoading(false);
+        }
+
+        async function stopFrontend() {
+            if (!confirm('確定要關閉前端介面嗎？')) return;
+            showLoading(true);
+            try {
+                const res = await fetch('/api/admin/stop_frontend', { method: 'POST' });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok || !data.success) {
+                    alert((data && data.message) ? data.message : '關閉前端失敗');
+                    return;
+                }
+                alert(data.message || '前端介面已關閉');
+            } catch (e) {
+                alert('關閉前端時發生錯誤: ' + e);
+            } finally {
+                showLoading(false);
+            }
         }
 
         // Machine Command

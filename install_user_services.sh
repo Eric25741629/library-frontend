@@ -9,6 +9,7 @@ USER_HOME="${HOME}"
 PROJECT_DIR="${ROOT_DIR}"
 HELPER_DIR="${USER_HOME}/bin"
 HELPER_SCRIPT="${HELPER_DIR}/start_browser_after_server.sh"
+WAIT_GUI_SCRIPT="${HELPER_DIR}/wait_gui_ready.sh"
 
 PY_SERVICE="pyserver.service"
 BROWSER_SERVICE="kiosk-browser.service"
@@ -119,6 +120,30 @@ PY
 
 install_browser_helper() {
   mkdir -p "${HELPER_DIR}"
+  cat > "${WAIT_GUI_SCRIPT}" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+DISPLAY_VALUE="${DISPLAY:-:0}"
+TIMEOUT="${1:-180}"
+
+is_ready() {
+  [[ -S "/tmp/.X11-unix/${DISPLAY_VALUE#:}" ]]
+}
+
+for _ in $(seq 1 "${TIMEOUT}"); do
+  if is_ready; then
+    echo "[INFO] GUI ready on DISPLAY=${DISPLAY_VALUE}"
+    exit 0
+  fi
+  sleep 1
+done
+
+echo "[WARN] GUI not ready after ${TIMEOUT}s (DISPLAY=${DISPLAY_VALUE})"
+exit 1
+EOF
+  chmod +x "${WAIT_GUI_SCRIPT}"
+
   cat > "${HELPER_SCRIPT}" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -126,6 +151,8 @@ set -euo pipefail
 URL="http://127.0.0.1:5000/"
 BROWSER_BIN="${BROWSER_BIN:-firefox}"
 WINDOW_CLASS="${WINDOW_CLASS:-firefox.Firefox}"
+
+"${HOME}/bin/wait_gui_ready.sh" 180 || true
 
 wait_for_server() {
   local timeout=60

@@ -15,7 +15,11 @@ Wants=network-online.target
 
 Type=simple
 
+Environment=DISPLAY=:0
+
 WorkingDirectory=__PROJECT_DIR__
+
+ExecStartPre=/bin/bash __HOME__/bin/wait_gui_ready.sh 180
 
 ExecStart=/usr/bin/python3 __PROJECT_DIR__/app.py
 

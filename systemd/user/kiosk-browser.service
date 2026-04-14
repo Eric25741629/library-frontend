@@ -7,14 +7,20 @@
 Description=Firefox Auto (restart on crash)
 
 Wants=pyserver.service
+Wants=graphical-session.target
 
 After=pyserver.service
+After=graphical-session.target
 
 
 
 [Service]
 
 Type=simple
+
+Environment=DISPLAY=:0
+
+ExecStartPre=/bin/bash __HOME__/bin/wait_gui_ready.sh 180
 
 ExecStart=/bin/bash __HOME__/bin/start_browser_after_server.sh
 Restart=always

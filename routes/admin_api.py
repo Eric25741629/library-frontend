@@ -3,6 +3,8 @@ from datetime import datetime
 import json
 import yaml
 import logging
+import os
+import subprocess
 from pathlib import Path
 
 import shared
@@ -127,6 +129,37 @@ def clear_history():
     finally:
         conn.close()
     return jsonify({"success": True, "message": "歷史紀錄已清空"})
+
+
+@admin_api_bp.route('/stop_frontend', methods=['POST'])
+def stop_frontend():
+    """允許管理員關閉前端 kiosk 瀏覽器服務。"""
+    uid = os.getuid()
+    env = os.environ.copy()
+    xdg_runtime = env.get('XDG_RUNTIME_DIR') or f'/run/user/{uid}'
+    env['XDG_RUNTIME_DIR'] = xdg_runtime
+    env.setdefault('DBUS_SESSION_BUS_ADDRESS', f'unix:path={xdg_runtime}/bus')
+
+    try:
+        result = subprocess.run(
+            ['systemctl', '--user', 'stop', 'kiosk-browser.service'],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            env=env,
+            check=False,
+        )
+    except Exception as e:
+        logger.error(f"stop_frontend exec error: {e}")
+        return jsonify({"success": False, "message": f"關閉前端失敗: {e}"}), 500
+
+    if result.returncode != 0:
+        err = (result.stderr or result.stdout or '').strip()
+        logger.error(f"stop_frontend failed: {err}")
+        return jsonify({"success": False, "message": f"關閉前端失敗: {err}"}), 500
+
+    logger.info("Admin action: kiosk-browser.service stopped")
+    return jsonify({"success": True, "message": "前端介面已關閉"})
 
 @admin_api_bp.route('/get_machine_params', methods=['GET'])
 def get_machine_params():
