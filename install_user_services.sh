@@ -155,6 +155,7 @@ WINDOW_CLASS="${WINDOW_CLASS:-firefox.Firefox}"
 export DISPLAY="${DISPLAY:-:0}"
 
 "${HOME}/bin/wait_gui_ready.sh" 180 || true
+sleep 10
 
 wait_for_server() {
   local timeout=60

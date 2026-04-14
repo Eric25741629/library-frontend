@@ -106,7 +106,7 @@ copy_project() {
 }
 
 ensure_kiosk_session() {
-  log "建立 Kiosk X Session（matchbox：不進 GNOME，只跑 Flask + Firefox）"
+  log "建立 kiosk session（已停用，保留函式供舊版本參考）"
 
   # 1) 建立 xsessions entry
   cat > /usr/share/xsessions/kiosk.desktop <<'EOF'
@@ -235,7 +235,7 @@ optional_acl_for_ros() {
 
 print_summary() {
   log "完成！重點設定如下"
-  echo "- Ubuntu: 20.04.x（已用 matchbox 建立 Kiosk Session）"
+  echo "- Ubuntu: 20.04.x（自動登入保留；不再建立 kiosk session）"
   echo "- GDM autologin: ${TARGET_USER}"
   echo "- Project dir: ${TARGET_PROJECT_DIR}"
   echo "- URL: ${URL}"
@@ -245,7 +245,7 @@ print_summary() {
   echo ""
   echo "若要維修（建議用 ros SSH / VS Code）："
   echo "  - 專案路徑：${TARGET_PROJECT_DIR}"
-  echo "  - kiosk session 腳本：/usr/local/bin/kiosk-session.sh"
+  echo "  - kiosk session：已停用，不會在新安裝時建立"
 }
 
 main() {
@@ -257,7 +257,6 @@ main() {
   ensure_user
   set_gdm_autologin
   copy_project "${src}"
-  ensure_kiosk_session
   optional_acl_for_ros
   print_summary
 }
