@@ -157,6 +157,11 @@ export DISPLAY="${DISPLAY:-:0}"
 "${HOME}/bin/wait_gui_ready.sh" 180 || true
 sleep 10
 
+hide_desktop_now() {
+  # 系統層保護：若偵測到離開 kiosk 狀態，先把畫面熄掉，避免桌面短暫暴露。
+  xset dpms force off >/dev/null 2>&1 || true
+}
+
 wait_for_server() {
   local timeout=60
   for _ in $(seq 1 "${timeout}"); do
@@ -170,13 +175,115 @@ wait_for_server() {
 
 wait_for_server || true
 
+log_monitor() {
+  echo "[MONITOR] $*"
+}
+
 is_fullscreen() {
   local win_id="$1"
-  xprop -id "${win_id}" _NET_WM_STATE 2>/dev/null | grep -q "_NET_WM_STATE_FULLSCREEN"
+  local state=""
+
+  if [[ -z "${win_id}" ]]; then
+    return 1
+  fi
+
+  state="$(timeout 1 xprop -id "${win_id}" _NET_WM_STATE 2>/dev/null || true)"
+  [[ -n "${state}" ]] && grep -q "_NET_WM_STATE_FULLSCREEN" <<<"${state}"
 }
 
 find_browser_window() {
   wmctrl -lx 2>/dev/null | awk -v cls="${WINDOW_CLASS}" '$3 == cls {print $1; exit}'
+}
+
+window_is_viewable() {
+  local win_id="$1"
+  [[ -n "${win_id}" ]] || return 1
+  xwininfo -id "${win_id}" 2>/dev/null | grep -q "Map State: IsViewable"
+}
+
+window_id_to_dec() {
+  local win_id="$1"
+  [[ -n "${win_id}" ]] || return 1
+  printf '%d\n' "$((win_id))" 2>/dev/null
+}
+
+active_window_dec() {
+  local active_win=""
+
+  if command -v xdotool >/dev/null 2>&1; then
+    active_win="$(xdotool getactivewindow 2>/dev/null || true)"
+    if [[ -n "${active_win}" ]]; then
+      echo "${active_win}"
+      return 0
+    fi
+  fi
+
+  active_win="$(xprop -root _NET_ACTIVE_WINDOW 2>/dev/null | awk -F' ' '{print $NF}' || true)"
+  if [[ "${active_win}" == "0x0" || -z "${active_win}" ]]; then
+    return 1
+  fi
+
+  window_id_to_dec "${active_win}"
+}
+
+window_is_foreground() {
+  local browser_win_id="$1"
+  local browser_win_dec=""
+  local active_win_dec=""
+
+  browser_win_dec="$(window_id_to_dec "${browser_win_id}" || true)"
+  active_win_dec="$(active_window_dec || true)"
+
+  [[ -n "${browser_win_dec}" ]] || return 1
+  [[ -n "${active_win_dec}" ]] || return 0
+  [[ "${browser_win_dec}" == "${active_win_dec}" ]]
+}
+
+window_geometry() {
+  local win_id="$1"
+
+  xwininfo -id "${win_id}" 2>/dev/null | awk '
+    /Absolute upper-left X:/ {x=$4}
+    /Absolute upper-left Y:/ {y=$4}
+    /^  Width:/ {w=$2}
+    /^  Height:/ {h=$2}
+    END {
+      if (x != "" && y != "" && w != "" && h != "") {
+        print x, y, w, h
+      }
+    }
+  '
+}
+
+screen_geometry() {
+  if command -v xdotool >/dev/null 2>&1; then
+    xdotool getdisplaygeometry 2>/dev/null || true
+    return 0
+  fi
+
+  xdpyinfo 2>/dev/null | awk '/dimensions:/ {split($2, a, "x"); print a[1], a[2]; exit}'
+}
+
+window_covers_screen() {
+  local win_id="$1"
+  local tolerance=2
+  local wx wy ww wh sw sh
+  local win_geo=""
+  local scr_geo=""
+
+  win_geo="$(window_geometry "${win_id}" || true)"
+  scr_geo="$(screen_geometry || true)"
+
+  [[ -n "${win_geo}" && -n "${scr_geo}" ]] || return 0
+
+  read -r wx wy ww wh <<<"${win_geo}"
+  read -r sw sh <<<"${scr_geo}"
+
+  (( wx >= -tolerance && wx <= tolerance )) || return 1
+  (( wy >= -tolerance && wy <= tolerance )) || return 1
+  (( ww >= sw - tolerance )) || return 1
+  (( wh >= sh - tolerance )) || return 1
+  return 0
 }
 
 wait_browser_window() {
@@ -196,30 +303,62 @@ wait_browser_window() {
 watch_fullscreen() {
   local browser_pid="$1"
   local win_id=""
+  local poll_count=0
+  local new_win_id=""
+  local restart_reason=""
 
   win_id="$(wait_browser_window || true)"
   if [[ -z "${win_id}" ]]; then
+    log_monitor "browser window not found after launch"
     kill "${browser_pid}" 2>/dev/null || true
     return 0
   fi
 
+  log_monitor "tracking browser window ${win_id}"
+
   while kill -0 "${browser_pid}" 2>/dev/null; do
-    if ! is_fullscreen "${win_id}"; then
-      # Leave fullscreen -> immediately restart browser to avoid showing desktop.
+    poll_count=$((poll_count + 1))
+
+    if (( poll_count % 10 == 0 )); then
+      new_win_id="$(find_browser_window || true)"
+      if [[ -n "${new_win_id}" && "${new_win_id}" != "${win_id}" ]]; then
+        log_monitor "browser window changed ${win_id} -> ${new_win_id}"
+        win_id="${new_win_id}"
+      fi
+    fi
+
+    if ! window_is_viewable "${win_id}"; then
+      restart_reason="window-not-viewable"
+    elif ! is_fullscreen "${win_id}"; then
+      restart_reason="fullscreen-exit"
+    elif ! window_is_foreground "${win_id}"; then
+      restart_reason="focus-lost"
+    elif ! window_covers_screen "${win_id}"; then
+      restart_reason="geometry-mismatch"
+    else
+      restart_reason=""
+    fi
+
+    if [[ -n "${restart_reason}" ]]; then
+      log_monitor "restart trigger: ${restart_reason}"
+      # Leave kiosk state -> immediately blank screen, then restart browser to avoid showing desktop.
+      hide_desktop_now
       kill "${browser_pid}" 2>/dev/null || true
       return 0
     fi
+
     sleep 0.2
   done
 }
 
 while true; do
-  if command -v wmctrl >/dev/null 2>&1 && command -v xprop >/dev/null 2>&1; then
+  if command -v wmctrl >/dev/null 2>&1 && command -v xprop >/dev/null 2>&1 && command -v xwininfo >/dev/null 2>&1; then
     "${BROWSER_BIN}" --kiosk "${URL}" &
     browser_pid="$!"
     watch_fullscreen "${browser_pid}"
     wait "${browser_pid}" 2>/dev/null || true
   else
+    log_monitor "fallback mode: missing wmctrl/xprop/xwininfo, fullscreen monitoring disabled"
     "${BROWSER_BIN}" --kiosk "${URL}" || true
   fi
   sleep 0.1
@@ -245,9 +384,12 @@ install_systemd_services() {
     return 1
   fi
 
-  if ! command -v wmctrl >/dev/null 2>&1 || ! command -v xprop >/dev/null 2>&1; then
-    echo "[WARN] 缺少 wmctrl 或 xprop，將無法監測離開全螢幕。"
-    echo "[WARN] 請先安裝：sudo apt-get install -y wmctrl x11-utils"
+  if ! command -v wmctrl >/dev/null 2>&1 || ! command -v xprop >/dev/null 2>&1 || ! command -v xwininfo >/dev/null 2>&1; then
+    echo "[WARN] 缺少 wmctrl/xprop/xwininfo，將無法啟用完整 kiosk 狀態監測。"
+    echo "[WARN] 建議安裝：sudo apt-get install -y wmctrl x11-utils xdotool"
+  elif ! command -v xdotool >/dev/null 2>&1; then
+    echo "[WARN] 未安裝 xdotool，前景視窗判斷會改用 xprop fallback。"
+    echo "[WARN] 建議安裝：sudo apt-get install -y xdotool"
   fi
 
   mkdir -p "${DEST_DIR}"

@@ -33,11 +33,11 @@ need_root() {
 log() { printf "\n\033[1m%s\033[0m\n" "$*"; }
 
 ensure_pkg() {
-  log "安裝必要套件（firefox/curl/matchbox/unclutter/xset/wmctrl/xprop/acl）"
+  log "安裝必要套件（firefox/curl/matchbox/unclutter/xset/wmctrl/xprop/xdotool/acl）"
   apt-get update -y
   apt-get install -y \
     firefox curl \
-    matchbox-window-manager unclutter x11-xserver-utils x11-utils wmctrl \
+    matchbox-window-manager unclutter x11-xserver-utils x11-utils wmctrl xdotool \
     acl
 }
 
@@ -156,14 +156,120 @@ for i in \$(seq 1 "\${WAIT_TIMEOUT}"); do
   sleep 1
 done
 
+hide_desktop_now() {
+  xset dpms force off >/dev/null 2>&1 || true
+}
+
 # Firefox：被關掉/崩潰就立刻拉回來
+log_monitor() {
+  echo "[MONITOR] \$*"
+}
+
 is_fullscreen() {
   local win_id="\$1"
-  xprop -id "\${win_id}" _NET_WM_STATE 2>/dev/null | grep -q "_NET_WM_STATE_FULLSCREEN"
+  local state=""
+
+  if [[ -z "\${win_id}" ]]; then
+    return 1
+  fi
+
+  state="\$(timeout 1 xprop -id "\${win_id}" _NET_WM_STATE 2>/dev/null || true)"
+  [[ -n "\${state}" ]] && grep -q "_NET_WM_STATE_FULLSCREEN" <<<"\${state}"
 }
 
 find_browser_window() {
   wmctrl -lx 2>/dev/null | awk '$3 == "firefox.Firefox" {print $1; exit}'
+}
+
+window_is_viewable() {
+  local win_id="\$1"
+  [[ -n "\${win_id}" ]] || return 1
+  xwininfo -id "\${win_id}" 2>/dev/null | grep -q "Map State: IsViewable"
+}
+
+window_id_to_dec() {
+  local win_id="\$1"
+  [[ -n "\${win_id}" ]] || return 1
+  printf '%d\\n' "\$((win_id))" 2>/dev/null
+}
+
+active_window_dec() {
+  local active_win=""
+
+  if command -v xdotool >/dev/null 2>&1; then
+    active_win="\$(xdotool getactivewindow 2>/dev/null || true)"
+    if [[ -n "\${active_win}" ]]; then
+      echo "\${active_win}"
+      return 0
+    fi
+  fi
+
+  active_win="\$(xprop -root _NET_ACTIVE_WINDOW 2>/dev/null | awk -F' ' '{print $NF}' || true)"
+  if [[ "\${active_win}" == "0x0" || -z "\${active_win}" ]]; then
+    return 1
+  fi
+
+  window_id_to_dec "\${active_win}"
+}
+
+window_is_foreground() {
+  local browser_win_id="\$1"
+  local browser_win_dec=""
+  local active_win_dec=""
+
+  browser_win_dec="\$(window_id_to_dec "\${browser_win_id}" || true)"
+  active_win_dec="\$(active_window_dec || true)"
+
+  [[ -n "\${browser_win_dec}" ]] || return 1
+  [[ -n "\${active_win_dec}" ]] || return 0
+  [[ "\${browser_win_dec}" == "\${active_win_dec}" ]]
+}
+
+window_geometry() {
+  local win_id="\$1"
+
+  xwininfo -id "\${win_id}" 2>/dev/null | awk '
+    /Absolute upper-left X:/ {x=$4}
+    /Absolute upper-left Y:/ {y=$4}
+    /^  Width:/ {w=$2}
+    /^  Height:/ {h=$2}
+    END {
+      if (x != "" && y != "" && w != "" && h != "") {
+        print x, y, w, h
+      }
+    }
+  '
+}
+
+screen_geometry() {
+  if command -v xdotool >/dev/null 2>&1; then
+    xdotool getdisplaygeometry 2>/dev/null || true
+    return 0
+  fi
+
+  xdpyinfo 2>/dev/null | awk '/dimensions:/ {split($2, a, "x"); print a[1], a[2]; exit}'
+}
+
+window_covers_screen() {
+  local win_id="\$1"
+  local tolerance=2
+  local wx wy ww wh sw sh
+  local win_geo=""
+  local scr_geo=""
+
+  win_geo="\$(window_geometry "\${win_id}" || true)"
+  scr_geo="\$(screen_geometry || true)"
+
+  [[ -n "\${win_geo}" && -n "\${scr_geo}" ]] || return 0
+
+  read -r wx wy ww wh <<<"\${win_geo}"
+  read -r sw sh <<<"\${scr_geo}"
+
+  (( wx >= -tolerance && wx <= tolerance )) || return 1
+  (( wy >= -tolerance && wy <= tolerance )) || return 1
+  (( ww >= sw - tolerance )) || return 1
+  (( wh >= sh - tolerance )) || return 1
+  return 0
 }
 
 wait_browser_window() {
@@ -183,16 +289,46 @@ wait_browser_window() {
 watch_fullscreen() {
   local browser_pid="\$1"
   local win_id=""
+  local poll_count=0
+  local new_win_id=""
+  local restart_reason=""
 
   win_id="\$(wait_browser_window || true)"
   if [[ -z "\${win_id}" ]]; then
+    log_monitor "browser window not found after launch"
     kill "\${browser_pid}" 2>/dev/null || true
     return 0
   fi
 
+  log_monitor "tracking browser window \${win_id}"
+
   while kill -0 "\${browser_pid}" 2>/dev/null; do
-    if ! is_fullscreen "\${win_id}"; then
-      # Leave fullscreen -> immediately restart browser to avoid showing desktop.
+    poll_count=\$((poll_count + 1))
+
+    if (( poll_count % 10 == 0 )); then
+      new_win_id="\$(find_browser_window || true)"
+      if [[ -n "\${new_win_id}" && "\${new_win_id}" != "\${win_id}" ]]; then
+        log_monitor "browser window changed \${win_id} -> \${new_win_id}"
+        win_id="\${new_win_id}"
+      fi
+    fi
+
+    if ! window_is_viewable "\${win_id}"; then
+      restart_reason="window-not-viewable"
+    elif ! is_fullscreen "\${win_id}"; then
+      restart_reason="fullscreen-exit"
+    elif ! window_is_foreground "\${win_id}"; then
+      restart_reason="focus-lost"
+    elif ! window_covers_screen "\${win_id}"; then
+      restart_reason="geometry-mismatch"
+    else
+      restart_reason=""
+    fi
+
+    if [[ -n "\${restart_reason}" ]]; then
+      # Leave kiosk state -> immediately restart browser to avoid showing desktop.
+      log_monitor "restart trigger: \${restart_reason}"
+      hide_desktop_now
       kill "\${browser_pid}" 2>/dev/null || true
       return 0
     fi
@@ -201,12 +337,13 @@ watch_fullscreen() {
 }
 
 while true; do
-  if command -v wmctrl >/dev/null 2>&1 && command -v xprop >/dev/null 2>&1; then
+  if command -v wmctrl >/dev/null 2>&1 && command -v xprop >/dev/null 2>&1 && command -v xwininfo >/dev/null 2>&1; then
     ${BROWSER_BIN} ${BROWSER_ARGS[*]} "\${URL}" &
     browser_pid="\$!"
     watch_fullscreen "\${browser_pid}"
     wait "\${browser_pid}" 2>/dev/null || true
   else
+    log_monitor "fallback mode: missing wmctrl/xprop/xwininfo, fullscreen monitoring disabled"
     ${BROWSER_BIN} ${BROWSER_ARGS[*]} "\${URL}" || true
   fi
   sleep 0.1
