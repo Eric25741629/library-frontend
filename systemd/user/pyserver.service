@@ -16,6 +16,7 @@ Wants=network-online.target
 Type=simple
 
 Environment=DISPLAY=:0
+Environment=LOG_DIR=__LOG_DIR__
 
 WorkingDirectory=__PROJECT_DIR__
 

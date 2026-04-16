@@ -9,33 +9,113 @@ HELPER_DIR="${USER_HOME}/bin"
 HELPER_SCRIPT="${HELPER_DIR}/start_browser_after_server.sh"
 WAIT_GUI_SCRIPT="${HELPER_DIR}/wait_gui_ready.sh"
 
+is_project_dir() {
+  local dir="$1"
+  [[ -f "${dir}/app.py" && -f "${dir}/requirements.txt" && -f "${dir}/install_user_services.sh" ]]
+}
+
+get_origin_url() {
+  local dir="$1"
+  git -C "${dir}" config --get remote.origin.url 2>/dev/null || true
+}
+
 resolve_project_dir() {
   local root_dir="$1"
   local user_home="$2"
   local project_name=""
+  local root_origin=""
+  local candidate_origin=""
+  local first_valid=""
   local candidate=""
+  local script_path=""
+  local -a candidates=()
 
-  if [[ "${root_dir}" == "${user_home}"/* ]]; then
+  if [[ "${root_dir}" == "${user_home}"/* ]] && is_project_dir "${root_dir}"; then
     echo "${root_dir}"
     return 0
   fi
 
   project_name="$(basename "${root_dir}")"
+  root_origin="$(get_origin_url "${root_dir}")"
 
-  for candidate in \
-    "${user_home}/下載/${project_name}" \
-    "${user_home}/${project_name}"; do
-    if [[ -f "${candidate}/app.py" && -f "${candidate}/requirements.txt" ]]; then
-      echo "${candidate}"
-      return 0
+  # Common local checkout paths under the target user's home.
+  candidates+=(
+    "${user_home}/下載/${project_name}"
+    "${user_home}/${project_name}"
+    "${user_home}/lib/${project_name}"
+    "${user_home}/lib/library"
+    "${user_home}/workspace/${project_name}"
+    "${user_home}/projects/${project_name}"
+  )
+
+  for candidate in "${candidates[@]}"; do
+    if ! is_project_dir "${candidate}"; then
+      continue
+    fi
+
+    if [[ -z "${first_valid}" ]]; then
+      first_valid="${candidate}"
+    fi
+
+    if [[ -n "${root_origin}" ]]; then
+      candidate_origin="$(get_origin_url "${candidate}")"
+      if [[ "${candidate_origin}" == "${root_origin}" ]]; then
+        echo "${candidate}"
+        return 0
+      fi
     fi
   done
+
+  # Fallback: scan home for matching install scripts and prefer same git origin.
+  while IFS= read -r script_path; do
+    candidate="$(dirname "${script_path}")"
+    if ! is_project_dir "${candidate}"; then
+      continue
+    fi
+
+    if [[ -z "${first_valid}" ]]; then
+      first_valid="${candidate}"
+    fi
+
+    if [[ -n "${root_origin}" ]]; then
+      candidate_origin="$(get_origin_url "${candidate}")"
+      if [[ "${candidate_origin}" == "${root_origin}" ]]; then
+        echo "${candidate}"
+        return 0
+      fi
+    fi
+  done < <(find "${user_home}" -maxdepth 4 -type f -name install_user_services.sh 2>/dev/null)
+
+  if [[ -n "${first_valid}" ]]; then
+    echo "${first_valid}"
+    return 0
+  fi
+
+  if is_project_dir "${root_dir}"; then
+    echo "${root_dir}"
+    return 0
+  fi
 
   echo "${root_dir}"
 }
 
+resolve_log_dir() {
+  local project_dir="$1"
+  local user_home="$2"
+  local fallback_log_dir="${user_home}/lib/library/logs"
+
+  if [[ "${project_dir}" == "${user_home}"/* ]] && is_project_dir "${project_dir}"; then
+    echo "${project_dir}/logs"
+    return 0
+  fi
+
+  mkdir -p "${fallback_log_dir}"
+  echo "${fallback_log_dir}"
+}
+
 PROJECT_DIR="${PROJECT_DIR_OVERRIDE:-$(resolve_project_dir "${ROOT_DIR}" "${USER_HOME}")}"
 REQ_FILE="${PROJECT_DIR}/requirements.txt"
+LOG_DIR="${LOG_DIR_OVERRIDE:-$(resolve_log_dir "${PROJECT_DIR}" "${USER_HOME}")}"
 
 PY_SERVICE="pyserver.service"
 BROWSER_SERVICE="kiosk-browser.service"
@@ -50,6 +130,7 @@ usage() {
 
 可選環境變數：
   PROJECT_DIR_OVERRIDE=/path/to/project  強制指定 service 使用的專案目錄
+  LOG_DIR_OVERRIDE=/path/to/logs         強制指定後端 logs 目錄
 
 預設會同時安裝：
   - systemd user services
@@ -131,7 +212,7 @@ render_template() {
   local src_file="$1"
   local dest_file="$2"
 
-  python3 - "$src_file" "$dest_file" "$PROJECT_DIR" "$USER_HOME" <<'PY'
+  python3 - "$src_file" "$dest_file" "$PROJECT_DIR" "$USER_HOME" "$LOG_DIR" <<'PY'
 from pathlib import Path
 import sys
 
@@ -139,10 +220,12 @@ src = Path(sys.argv[1])
 dest = Path(sys.argv[2])
 project_dir = sys.argv[3]
 user_home = sys.argv[4]
+log_dir = sys.argv[5]
 
 text = src.read_text(encoding='utf-8')
 text = text.replace('__PROJECT_DIR__', project_dir)
 text = text.replace('__HOME__', user_home)
+text = text.replace('__LOG_DIR__', log_dir)
 dest.write_text(text, encoding='utf-8')
 PY
 }
@@ -422,6 +505,7 @@ install_systemd_services() {
   fi
 
   echo "[INFO] 服務將使用專案路徑：${PROJECT_DIR}"
+  echo "[INFO] 後端 logs 路徑：${LOG_DIR}"
   if [[ "${PROJECT_DIR}" == "${ROOT_DIR}" && "${ROOT_DIR}" != "${USER_HOME}"/* ]]; then
     echo "[WARN] 目前是從其他使用者的目錄安裝，未找到 ${USER_HOME} 下的同名專案副本。"
     echo "[WARN] 如需強制指定，請設定 PROJECT_DIR_OVERRIDE=/path/to/project"

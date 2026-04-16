@@ -1,6 +1,7 @@
 import logging
 from logging.handlers import TimedRotatingFileHandler
 import json
+import os
 from pathlib import Path
 import yaml
 import sys
@@ -21,7 +22,7 @@ BOX_DB_FILE = 'return_box.db'
 
 # 設定基礎目錄
 BASE_DIR = Path(__file__).resolve().parent
-LOG_DIR = BASE_DIR / 'logs'
+LOG_DIR = Path(os.environ.get('LOG_DIR', str(BASE_DIR / 'logs'))).expanduser()
 LOG_DIR.mkdir(exist_ok=True)
 LOCALES_DIR = BASE_DIR / 'locales'
 
