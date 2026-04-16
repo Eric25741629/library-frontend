@@ -4,12 +4,54 @@ import time
 import threading
 import logging
 import asyncio
+import os
+import subprocess
 
 import shared
 import config
 
 api_bp = Blueprint('api', __name__)
 logger = logging.getLogger('api')
+
+_FRONTEND_RESTART_LOCK = threading.Lock()
+_FRONTEND_RESTART_IN_PROGRESS = False
+_FRONTEND_RESTART_LAST_TS = 0.0
+
+
+def _build_user_systemd_env():
+    """Build environment required for systemctl --user from Flask service context."""
+    uid = os.getuid()
+    env = os.environ.copy()
+    xdg_runtime = env.get('XDG_RUNTIME_DIR') or f'/run/user/{uid}'
+    env['XDG_RUNTIME_DIR'] = xdg_runtime
+    env.setdefault('DBUS_SESSION_BUS_ADDRESS', f'unix:path={xdg_runtime}/bus')
+    return env
+
+
+def _restart_frontend_services(trigger: str):
+    global _FRONTEND_RESTART_IN_PROGRESS
+    try:
+        # Give current HTTP response a short window to flush before restarting pyserver.
+        time.sleep(1.0)
+        env = _build_user_systemd_env()
+        result = subprocess.run(
+            ['systemctl', '--user', 'restart', 'pyserver.service', 'kiosk-browser.service'],
+            capture_output=True,
+            text=True,
+            timeout=20,
+            env=env,
+            check=False,
+        )
+        if result.returncode != 0:
+            err = (result.stderr or result.stdout or '').strip()
+            logger.error(f"frontend auto-restart failed (trigger={trigger}): {err}")
+        else:
+            logger.warning(f"frontend auto-restart triggered (trigger={trigger})")
+    except Exception as e:
+        logger.error(f"frontend auto-restart exception (trigger={trigger}): {e}")
+    finally:
+        with _FRONTEND_RESTART_LOCK:
+            _FRONTEND_RESTART_IN_PROGRESS = False
 
 def _compute_target_bin(location: str, book_id: str = None) -> int:
     """根據條碼編號決定分類箱：
@@ -126,6 +168,63 @@ def get_status():
         "is_homed": is_homed,
         "machine_debug": machine_debug
     })
+
+
+@api_bp.route('/frontend/fullscreen_lost', methods=['POST'])
+def frontend_fullscreen_lost():
+    """Receive fullscreen-loss signal from kiosk frontend and restart services if needed."""
+    global _FRONTEND_RESTART_LAST_TS, _FRONTEND_RESTART_IN_PROGRESS
+
+    if shared.is_manual_frontend_stop_active():
+        return jsonify({
+            "success": True,
+            "skipped": True,
+            "reason": "manual_stop_active",
+            "message": "已偵測為人工關閉，略過自動重啟"
+        })
+
+    payload = request.json or {}
+    trigger = str(payload.get('trigger') or 'unknown').strip()[:64]
+    now = time.time()
+
+    with _FRONTEND_RESTART_LOCK:
+        # Debounce noisy browser events (resize/visibility/fullscreenchange may fire in burst).
+        if _FRONTEND_RESTART_IN_PROGRESS:
+            return jsonify({
+                "success": True,
+                "skipped": True,
+                "reason": "restart_in_progress",
+                "message": "重啟程序進行中"
+            })
+
+        if (now - _FRONTEND_RESTART_LAST_TS) < 15:
+            return jsonify({
+                "success": True,
+                "skipped": True,
+                "reason": "cooldown",
+                "message": "重啟冷卻中"
+            })
+
+        _FRONTEND_RESTART_LAST_TS = now
+        _FRONTEND_RESTART_IN_PROGRESS = True
+
+    threading.Thread(target=_restart_frontend_services, args=(trigger,), daemon=True).start()
+
+    return jsonify({
+        "success": True,
+        "scheduled": True,
+        "message": "已通知後端重啟服務",
+        "trigger": trigger
+    })
+
+
+@api_bp.route('/frontend/session_started', methods=['POST'])
+def frontend_session_started():
+    """Clear manual-stop suppression when kiosk frontend is intentionally started again."""
+    if shared.is_manual_frontend_stop_active():
+        shared.clear_manual_frontend_stop()
+        logger.info("frontend manual-stop suppression cleared by new session")
+    return jsonify({"success": True})
 
 @api_bp.route('/scan', methods=['POST'])
 def scan_book():

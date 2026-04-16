@@ -42,6 +42,11 @@ REQUIRE_ADMIN_LOGIN = False
 DEFAULT_LANG = 'zh-TW'
 LOCALES = {}
 
+# 當管理端主動執行「關閉前端介面」時，持續抑制自動重啟流程，
+# 直到前端再次啟動後主動清除。
+MANUAL_FRONTEND_STOP_ACTIVE = False
+_MANUAL_FRONTEND_STOP_LOCK = threading.Lock()
+
 # 全域物件
 machine = None
 sip2 = None
@@ -190,6 +195,26 @@ def get_bin_counts():
         return {"1": 0, "2": 0}
     finally:
         conn.close()
+
+
+def mark_manual_frontend_stop():
+    """標記前端為人工關閉，持續忽略全螢幕退出自動重啟。"""
+    global MANUAL_FRONTEND_STOP_ACTIVE
+    with _MANUAL_FRONTEND_STOP_LOCK:
+        MANUAL_FRONTEND_STOP_ACTIVE = True
+
+
+def clear_manual_frontend_stop():
+    """前端重新啟動後，解除人工關閉保護狀態。"""
+    global MANUAL_FRONTEND_STOP_ACTIVE
+    with _MANUAL_FRONTEND_STOP_LOCK:
+        MANUAL_FRONTEND_STOP_ACTIVE = False
+
+
+def is_manual_frontend_stop_active() -> bool:
+    """目前是否處於人工關閉前端的保護狀態。"""
+    with _MANUAL_FRONTEND_STOP_LOCK:
+        return bool(MANUAL_FRONTEND_STOP_ACTIVE)
 
 # --- 初始化函式 ---
 def load_config():

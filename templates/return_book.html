@@ -353,6 +353,52 @@
         // SKIP_STATUS_UNTIL 存放取樣暫停到的時間（ms since epoch）。
         let SKIP_STATUS_UNTIL = 0;
 
+        // 全螢幕監測：若 kiosk 離開全螢幕，通知後端重啟服務。
+        let fullscreenNotifySent = false;
+        let fullscreenCheckTimer = null;
+
+        function isKioskFullscreenLike() {
+            // 部分瀏覽器不回報 fullscreenElement（例如 kiosk 參數），改用視窗尺寸做容錯判斷。
+            if (document.fullscreenElement) return true;
+            const tolerance = 4;
+            const targetW = Math.max(screen.width || 0, screen.availWidth || 0);
+            const targetH = Math.max(screen.height || 0, screen.availHeight || 0);
+            const wOk = (window.innerWidth || 0) >= (targetW - tolerance);
+            const hOk = (window.innerHeight || 0) >= (targetH - tolerance);
+            return wOk && hOk;
+        }
+
+        async function notifyFullscreenLost(trigger) {
+            if (fullscreenNotifySent) return;
+            fullscreenNotifySent = true;
+            try {
+                await fetch('/api/frontend/fullscreen_lost', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        trigger: trigger || 'unknown',
+                        path: window.location.pathname,
+                        ts: Date.now()
+                    })
+                });
+            } catch (e) {
+                console.warn('notifyFullscreenLost failed', e);
+            }
+        }
+
+        function scheduleFullscreenCheck(trigger, delayMs = 800) {
+            if (fullscreenNotifySent) return;
+            if (fullscreenCheckTimer) clearTimeout(fullscreenCheckTimer);
+            fullscreenCheckTimer = setTimeout(() => {
+                if (!isKioskFullscreenLike()) {
+                    notifyFullscreenLost(trigger);
+                }
+            }, delayMs);
+        }
+
+        // 前端重新啟動時清除「人工關閉」保護旗標，恢復一般監測行為。
+        fetch('/api/frontend/session_started', { method: 'POST' }).catch(() => {});
+
         /*
           Helper: 只在必要時執行喚醒並回原點 (wake_and_home)
           - 若 /api/status 回傳機器已就緒 (is_homed 且非 sleeping)，則跳過 wake_and_home。
@@ -1293,6 +1339,21 @@
             document.addEventListener('touchstart', tryWake);
             document.addEventListener('keypress', tryWake);
         })();
+
+        // 監聽影響 kiosk 視窗狀態的事件，離開全螢幕時通知後端。
+        document.addEventListener('fullscreenchange', () => scheduleFullscreenCheck('fullscreenchange'));
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'hidden') {
+                scheduleFullscreenCheck('visibility-hidden', 300);
+            } else {
+                scheduleFullscreenCheck('visibility-visible', 800);
+            }
+        });
+        window.addEventListener('resize', () => scheduleFullscreenCheck('resize'));
+        window.addEventListener('blur', () => scheduleFullscreenCheck('blur', 300));
+        window.addEventListener('focus', () => scheduleFullscreenCheck('focus', 800));
+        // 初次載入也做一次檢查，避免程式啟動時就不是全螢幕。
+        scheduleFullscreenCheck('initial-load', 1500);
 
         // 每 15 秒檢查一次
         setInterval(checkSystemStatus, 15000);

@@ -134,6 +134,9 @@ def clear_history():
 @admin_api_bp.route('/stop_frontend', methods=['POST'])
 def stop_frontend():
     """允許管理員關閉前端 kiosk 瀏覽器服務。"""
+    # 人工關閉前端時，持續抑制「非全螢幕 -> 自動重啟」機制。
+    shared.mark_manual_frontend_stop()
+
     uid = os.getuid()
     env = os.environ.copy()
     xdg_runtime = env.get('XDG_RUNTIME_DIR') or f'/run/user/{uid}'
