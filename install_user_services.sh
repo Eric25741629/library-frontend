@@ -4,12 +4,38 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SRC_DIR="${ROOT_DIR}/systemd/user"
 DEST_DIR="${HOME}/.config/systemd/user"
-REQ_FILE="${ROOT_DIR}/requirements.txt"
 USER_HOME="${HOME}"
-PROJECT_DIR="${ROOT_DIR}"
 HELPER_DIR="${USER_HOME}/bin"
 HELPER_SCRIPT="${HELPER_DIR}/start_browser_after_server.sh"
 WAIT_GUI_SCRIPT="${HELPER_DIR}/wait_gui_ready.sh"
+
+resolve_project_dir() {
+  local root_dir="$1"
+  local user_home="$2"
+  local project_name=""
+  local candidate=""
+
+  if [[ "${root_dir}" == "${user_home}"/* ]]; then
+    echo "${root_dir}"
+    return 0
+  fi
+
+  project_name="$(basename "${root_dir}")"
+
+  for candidate in \
+    "${user_home}/下載/${project_name}" \
+    "${user_home}/${project_name}"; do
+    if [[ -f "${candidate}/app.py" && -f "${candidate}/requirements.txt" ]]; then
+      echo "${candidate}"
+      return 0
+    fi
+  done
+
+  echo "${root_dir}"
+}
+
+PROJECT_DIR="${PROJECT_DIR_OVERRIDE:-$(resolve_project_dir "${ROOT_DIR}" "${USER_HOME}")}"
+REQ_FILE="${PROJECT_DIR}/requirements.txt"
 
 PY_SERVICE="pyserver.service"
 BROWSER_SERVICE="kiosk-browser.service"
@@ -21,6 +47,9 @@ usage() {
   cat <<'EOF'
 用法：
   ./install_user_services.sh [--services-only] [--python-only] [--skip-python-deps]
+
+可選環境變數：
+  PROJECT_DIR_OVERRIDE=/path/to/project  強制指定 service 使用的專案目錄
 
 預設會同時安裝：
   - systemd user services
@@ -390,6 +419,12 @@ install_systemd_services() {
   elif ! command -v xdotool >/dev/null 2>&1; then
     echo "[WARN] 未安裝 xdotool，前景視窗判斷會改用 xprop fallback。"
     echo "[WARN] 建議安裝：sudo apt-get install -y xdotool"
+  fi
+
+  echo "[INFO] 服務將使用專案路徑：${PROJECT_DIR}"
+  if [[ "${PROJECT_DIR}" == "${ROOT_DIR}" && "${ROOT_DIR}" != "${USER_HOME}"/* ]]; then
+    echo "[WARN] 目前是從其他使用者的目錄安裝，未找到 ${USER_HOME} 下的同名專案副本。"
+    echo "[WARN] 如需強制指定，請設定 PROJECT_DIR_OVERRIDE=/path/to/project"
   fi
 
   mkdir -p "${DEST_DIR}"
