@@ -263,7 +263,7 @@ set -euo pipefail
 
 URL="http://127.0.0.1:5000/"
 BROWSER_BIN="${BROWSER_BIN:-firefox}"
-WINDOW_CLASS="${WINDOW_CLASS:-Firefox.firefox}"
+WINDOW_CLASS="${WINDOW_CLASS:-Navigator.firefox}"
 export DISPLAY="${DISPLAY:-:0}"
 
 "${HOME}/bin/wait_gui_ready.sh" 180 || true
