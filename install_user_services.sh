@@ -263,7 +263,7 @@ set -euo pipefail
 
 URL="http://127.0.0.1:5000/"
 BROWSER_BIN="${BROWSER_BIN:-firefox}"
-WINDOW_CLASS="${WINDOW_CLASS:-firefox.Firefox}"
+WINDOW_CLASS="${WINDOW_CLASS:-Firefox.firefox}"
 export DISPLAY="${DISPLAY:-:0}"
 
 "${HOME}/bin/wait_gui_ready.sh" 180 || true
@@ -399,7 +399,7 @@ window_covers_screen() {
 }
 
 wait_browser_window() {
-  local max_wait=50
+  local max_wait=150
   local i win_id
   for i in $(seq 1 "${max_wait}"); do
     win_id="$(find_browser_window || true)"
