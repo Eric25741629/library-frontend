@@ -521,13 +521,9 @@
         </div>
 
         <div class="sidebar-footer">
-            <a href="/" class="nav-item">
-                <i class="fas fa-external-link-alt"></i>
-                <span>{{ t('footer.back_to_front', '返回前台') }}</span>
-            </a>
-            <a href="/logout" class="nav-item" style="color: var(--danger-color);">
+            <a href="/logout" class="nav-item">
                 <i class="fas fa-sign-out-alt"></i>
-                <span>{{ t('footer.logout', '登出系統') }}</span>
+                <span>{{ t('footer.back_to_front', '返回前台') }}</span>
             </a>
             <div class="lang-switch-admin">
                 <a class="lang-btn-admin {% if current_lang == 'zh-TW' %}active{% endif %}" href="/set-lang/zh-TW">{{ t('lang.zh', '中文') }}</a>
