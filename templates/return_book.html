@@ -360,7 +360,8 @@
         function isKioskFullscreenLike() {
             // 部分瀏覽器不回報 fullscreenElement（例如 kiosk 參數），改用視窗尺寸做容錯判斷。
             if (document.fullscreenElement) return true;
-            const tolerance = 4;
+            // 容錯設為 80px，避免 HiDPI 縮放或系統列造成誤判。
+            const tolerance = 80;
             const targetW = Math.max(screen.width || 0, screen.availWidth || 0);
             const targetH = Math.max(screen.height || 0, screen.availHeight || 0);
             const wOk = (window.innerWidth || 0) >= (targetW - tolerance);
@@ -1341,19 +1342,18 @@
         })();
 
         // 監聽影響 kiosk 視窗狀態的事件，離開全螢幕時通知後端。
+        // 注意：blur/focus/visibility-visible 不代表離開全螢幕（條碼掃描器會觸發 blur），故移除。
         document.addEventListener('fullscreenchange', () => scheduleFullscreenCheck('fullscreenchange'));
         document.addEventListener('visibilitychange', () => {
+            // 只在頁面被隱藏時檢查（visible 方向不代表全螢幕遺失）
             if (document.visibilityState === 'hidden') {
                 scheduleFullscreenCheck('visibility-hidden', 300);
-            } else {
-                scheduleFullscreenCheck('visibility-visible', 800);
             }
         });
-        window.addEventListener('resize', () => scheduleFullscreenCheck('resize'));
-        window.addEventListener('blur', () => scheduleFullscreenCheck('blur', 300));
-        window.addEventListener('focus', () => scheduleFullscreenCheck('focus', 800));
-        // 初次載入也做一次檢查，避免程式啟動時就不是全螢幕。
-        scheduleFullscreenCheck('initial-load', 1500);
+        // resize 延遲拉長，避免 kiosk 啟動時視窗尺寸尚未穩定造成誤觸發。
+        window.addEventListener('resize', () => scheduleFullscreenCheck('resize', 3000));
+        // 初次載入延遲拉長，給 Firefox kiosk 足夠時間完成視窗配置。
+        scheduleFullscreenCheck('initial-load', 6000);
 
         // 每 15 秒檢查一次
         setInterval(checkSystemStatus, 15000);
