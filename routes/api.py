@@ -28,11 +28,43 @@ def _build_user_systemd_env():
     return env
 
 
+_INTRUDER_WINDOW_PROCS = (
+    # Touching these names terminates known GNOME/Ubuntu surface-level
+    # intruders that might have stolen focus from Firefox. This is a
+    # defense-in-depth layer; the primary defense is install_gnome_lockdown
+    # (disabling the keybindings that open them in the first place).
+    'gnome-control-center',
+    'gnome-calculator',
+    'gnome-screenshot',
+    'gnome-system-monitor',
+    'gnome-terminal',
+    'gnome-disks',
+    'nautilus',
+    'evince',
+    'eog',
+    'file-roller',
+    'gedit',
+    'xterm',
+)
+
+
+def _kill_intruder_windows():
+    for proc_name in _INTRUDER_WINDOW_PROCS:
+        try:
+            subprocess.run(['pkill', '-u', 'kiosk', '-f', proc_name],
+                           timeout=3, check=False)
+        except Exception as e:
+            logger.debug(f"pkill {proc_name} failed: {e}")
+
+
 def _restart_frontend_services(trigger: str):
     global _FRONTEND_RESTART_IN_PROGRESS
     try:
-        # Give current HTTP response a short window to flush before restarting pyserver.
+        # Give current HTTP response a short window to flush before restarting.
         time.sleep(1.0)
+        # Defense in depth: kill any intruder windows that stole focus before
+        # we restart Firefox, so Firefox returns to the top of the stack.
+        _kill_intruder_windows()
         env = _build_user_systemd_env()
         result = subprocess.run(
             ['systemctl', '--user', 'restart', 'kiosk-browser.service'],

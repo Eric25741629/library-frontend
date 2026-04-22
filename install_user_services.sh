@@ -322,6 +322,74 @@ USERJS
   echo "[INFO] Firefox user.js 已寫入：${profile_dir}/user.js"
 }
 
+install_gnome_lockdown() {
+  # 禁用所有能讓使用者逃出 kiosk 的 GNOME 快捷鍵：
+  #   Super 鍵、Alt+Tab、Alt+F2、Alt+F4、Super+A 等。
+  # 這是主要防線 — JS 層焦點監控只是後備（事後重啟救不回已經冒出來的視窗）。
+  if ! command -v gsettings >/dev/null 2>&1; then
+    echo "[WARN] 未安裝 gsettings，跳過 GNOME 快捷鍵鎖定"
+    return 0
+  fi
+
+  # 偵測 GNOME（避免在非 GNOME 環境呼叫會報錯）
+  if ! gsettings list-schemas 2>/dev/null | grep -q '^org\.gnome\.shell$'; then
+    echo "[INFO] 非 GNOME 環境，跳過 GNOME 快捷鍵鎖定"
+    return 0
+  fi
+
+  # 1. 禁用 Super 鍵開 Activities
+  gsettings set org.gnome.mutter overlay-key '' 2>/dev/null || true
+
+  # 2. WM keybindings 全部清空（除了視窗內部的保留鍵）
+  local wm_keys=(
+    switch-applications switch-applications-backward
+    switch-group switch-group-backward
+    switch-panels switch-panels-backward
+    cycle-windows cycle-windows-backward
+    cycle-group cycle-group-backward
+    cycle-panels cycle-panels-backward
+    panel-main-menu panel-run-dialog activate-window-menu close
+    begin-move begin-resize toggle-maximized maximize minimize unmaximize
+    switch-input-source switch-input-source-backward
+    switch-to-workspace-1 switch-to-workspace-2 switch-to-workspace-last
+    switch-to-workspace-up switch-to-workspace-down
+    switch-to-workspace-left switch-to-workspace-right
+    move-to-workspace-1 move-to-workspace-last
+    move-to-workspace-up move-to-workspace-down
+    move-to-workspace-left move-to-workspace-right
+    move-to-monitor-up move-to-monitor-down
+    move-to-monitor-left move-to-monitor-right
+  )
+  for k in "${wm_keys[@]}"; do
+    gsettings set org.gnome.desktop.wm.keybindings "$k" "[]" 2>/dev/null || true
+  done
+
+  # 3. GNOME Shell keybindings 清空（overview、app view、Super+數字 等）
+  local shell_keys=(
+    toggle-application-view toggle-overview toggle-message-tray
+    focus-active-notification open-application-menu
+    switch-to-application-1 switch-to-application-2 switch-to-application-3
+    switch-to-application-4 switch-to-application-5 switch-to-application-6
+    switch-to-application-7 switch-to-application-8 switch-to-application-9
+  )
+  for k in "${shell_keys[@]}"; do
+    gsettings set org.gnome.shell.keybindings "$k" "[]" 2>/dev/null || true
+  done
+
+  # 4. media-keys 裡的危險項（開設定、截圖、計算機、web browser、logout）
+  local media_keys=(
+    screenshot window-screenshot area-screenshot
+    screenshot-clip window-screenshot-clip area-screenshot-clip
+    magnifier magnifier-zoom-in magnifier-zoom-out
+    control-center search calculator www home email logout
+  )
+  for k in "${media_keys[@]}"; do
+    gsettings set org.gnome.settings-daemon.plugins.media-keys "$k" "[]" 2>/dev/null || true
+  done
+
+  echo "[INFO] GNOME 快捷鍵已鎖定（Super/Alt+Tab/Alt+F2/Alt+F4/截圖/控制中心 等已停用）"
+}
+
 install_systemd_services() {
   if [[ ! -f "${SRC_DIR}/${PY_SERVICE}" ]]; then
     echo "[ERROR] 找不到 ${SRC_DIR}/${PY_SERVICE}"
@@ -349,6 +417,7 @@ install_systemd_services() {
   mkdir -p "${DEST_DIR}"
   install_browser_helper
   install_firefox_userjs
+  install_gnome_lockdown
   render_template "${SRC_DIR}/${PY_SERVICE}" "${DEST_DIR}/${PY_SERVICE}"
   render_template "${SRC_DIR}/${BROWSER_SERVICE}" "${DEST_DIR}/${BROWSER_SERVICE}"
 

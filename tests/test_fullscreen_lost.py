@@ -45,8 +45,11 @@ def _reset_module_state():
 
 @pytest.fixture
 def mock_run():
-    """攔截 subprocess.run，讓測試不會真的重啟 systemd。"""
-    with patch('routes.api.subprocess.run') as m:
+    """攔截 systemctl subprocess.run（不攔截 pkill），讓測試聚焦在
+    『是否觸發重啟』本身。pkill 是 defense-in-depth，由
+    test_kiosk_lockdown.py 另外覆蓋。"""
+    with patch('routes.api.subprocess.run') as m, \
+         patch('routes.api._kill_intruder_windows'):
         result = MagicMock()
         result.returncode = 0
         result.stdout = ''
