@@ -50,21 +50,52 @@ class TestDuplicateSuppression:
         assert guard_pos < fetch_pos, "notified 守衛必須在 fetch 之前"
 
 
-class TestBadEventListenersMustNotReturn:
-    """這些是 2026-04-21 之前觸發雪崩的事件。永遠不能放回來。"""
+class TestFocusTracking:
+    """
+    Kiosk 威脅模型：焦點離開瀏覽器 = 有人可以操作上層視窗（file manager、
+    USB popup 等），必須觸發重啟。但要避開 4/21 雪崩路徑 — 所以要用
+    JS 的 blur event + document.hasFocus() 二次確認 + 啟動緩衝，
+    而不是舊版的 X11 xdotool getactivewindow 連發輪詢。
+    """
 
-    def test_no_blur_listener(self, js):
-        # blur 在條碼掃描器切換焦點時會觸發 — 不代表離開全螢幕。
-        assert not re.search(r"addEventListener\(\s*['\"]blur['\"]", js), (
-            "blur 事件會被條碼掃描器誤觸發，不可拿來判斷全螢幕")
+    def test_has_blur_listener(self, js):
+        assert re.search(r"addEventListener\(\s*['\"]blur['\"]", js), (
+            "kiosk 必須監聽 window.blur 才能偵測焦點離開瀏覽器")
 
-    def test_no_focus_listener(self, js):
-        assert not re.search(r"addEventListener\(\s*['\"]focus['\"]", js), (
-            "focus 不代表全螢幕，不可當監控訊號")
+    def test_blur_handler_uses_hasFocus_confirmation(self, js):
+        """單一 blur 事件不可直接觸發重啟 — 必須延遲後用 document.hasFocus() 二次確認。"""
+        assert 'document.hasFocus()' in js, (
+            "必須用 document.hasFocus() 二次確認，避免瞬間 blur 誤判")
+
+    def test_blur_handler_has_confirmation_delay(self, js):
+        """blur → 二次確認之間要有延遲（容忍短暫焦點抖動），至少 1.5 秒。"""
+        # blur listener 內 setTimeout 的延遲參數可以是字面數字或常數名
+        m = re.search(
+            r"addEventListener\(\s*['\"]blur['\"].*?setTimeout\([^,]+,\s*([A-Za-z_][\w]*|\d+)\s*\)",
+            js, re.DOTALL)
+        assert m, "blur 監聽內必須有 setTimeout 做延遲二次確認"
+        raw = m.group(1)
+        if raw.isdigit():
+            delay = int(raw)
+        else:
+            # 若是常數名稱（如 BLUR_CONFIRM_MS），從宣告處解析數值
+            const_m = re.search(
+                rf"(?:const|let|var)\s+{re.escape(raw)}\s*=\s*(\d+)", js)
+            assert const_m, f"找不到常數 {raw} 的宣告"
+            delay = int(const_m.group(1))
+        assert delay >= 1500, (
+            f"blur 確認延遲 {delay}ms 太短，可能誤判條碼掃描器等瞬間焦點切換")
+
+    def test_startup_grace_period_exists(self, js):
+        """Firefox 剛啟動的前若干秒可能尚未拿到焦點，必須有啟動緩衝期。"""
+        m = re.search(r"STARTUP_GRACE_MS\s*=\s*(\d+)", js)
+        assert m, "必須定義 STARTUP_GRACE_MS 啟動緩衝期"
+        grace = int(m.group(1))
+        assert grace >= 10000, (
+            f"啟動緩衝 {grace}ms 太短，Firefox 進 fullscreen + grab focus 需要時間")
 
     def test_no_visibility_visible_trigger(self, js):
         """visibilitychange 允許，但只能在 hidden 方向觸發檢查。"""
-        # 找出所有 visibilityState 比較
         matches = re.findall(r"visibilityState\s*===?\s*['\"](\w+)['\"]", js)
         if matches:
             assert 'visible' not in matches, (
