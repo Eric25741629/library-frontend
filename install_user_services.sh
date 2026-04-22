@@ -263,220 +263,63 @@ set -euo pipefail
 
 URL="http://127.0.0.1:5000/"
 BROWSER_BIN="${BROWSER_BIN:-firefox}"
-WINDOW_CLASS="${WINDOW_CLASS:-Navigator.firefox}"
 export DISPLAY="${DISPLAY:-:0}"
 
+# 等 X display 就緒，再給 GUI session 一點時間穩定。
 "${HOME}/bin/wait_gui_ready.sh" 180 || true
 sleep 10
 
-hide_desktop_now() {
-  # 系統層保護：若偵測到離開 kiosk 狀態，先把畫面熄掉，避免桌面短暫暴露。
-  xset dpms force off >/dev/null 2>&1 || true
-}
+# 等 Flask server 起來。
+for _ in $(seq 1 60); do
+  curl -fsS "${URL}" >/dev/null 2>&1 && break
+  sleep 1
+done
 
-wait_for_server() {
-  local timeout=60
-  for _ in $(seq 1 "${timeout}"); do
-    if curl -fsS "${URL}" >/dev/null 2>&1; then
-      return 0
-    fi
-    sleep 1
-  done
-  return 1
-}
-
-wait_for_server || true
-
-log_monitor() {
-  echo "[MONITOR] $*"
-}
-
-is_fullscreen() {
-  local win_id="$1"
-  local state=""
-
-  if [[ -z "${win_id}" ]]; then
-    return 1
-  fi
-
-  state="$(timeout 1 xprop -id "${win_id}" _NET_WM_STATE 2>/dev/null || true)"
-  [[ -n "${state}" ]] && grep -q "_NET_WM_STATE_FULLSCREEN" <<<"${state}"
-}
-
-find_browser_window() {
-  wmctrl -lx 2>/dev/null | awk -v cls="${WINDOW_CLASS}" '$3 == cls {print $1; exit}'
-}
-
-window_is_viewable() {
-  local win_id="$1"
-  [[ -n "${win_id}" ]] || return 1
-  xwininfo -id "${win_id}" 2>/dev/null | grep -q "Map State: IsViewable"
-}
-
-window_id_to_dec() {
-  local win_id="$1"
-  [[ -n "${win_id}" ]] || return 1
-  printf '%d\n' "$((win_id))" 2>/dev/null
-}
-
-active_window_dec() {
-  local active_win=""
-
-  if command -v xdotool >/dev/null 2>&1; then
-    active_win="$(xdotool getactivewindow 2>/dev/null || true)"
-    if [[ -n "${active_win}" ]]; then
-      echo "${active_win}"
-      return 0
-    fi
-  fi
-
-  active_win="$(xprop -root _NET_ACTIVE_WINDOW 2>/dev/null | awk -F' ' '{print $NF}' || true)"
-  if [[ "${active_win}" == "0x0" || -z "${active_win}" ]]; then
-    return 1
-  fi
-
-  window_id_to_dec "${active_win}"
-}
-
-window_is_foreground() {
-  local browser_win_id="$1"
-  local browser_win_dec=""
-  local active_win_dec=""
-
-  browser_win_dec="$(window_id_to_dec "${browser_win_id}" || true)"
-  active_win_dec="$(active_window_dec || true)"
-
-  [[ -n "${browser_win_dec}" ]] || return 1
-  [[ -n "${active_win_dec}" ]] || return 0
-  [[ "${browser_win_dec}" == "${active_win_dec}" ]]
-}
-
-window_geometry() {
-  local win_id="$1"
-
-  xwininfo -id "${win_id}" 2>/dev/null | awk '
-    /Absolute upper-left X:/ {x=$4}
-    /Absolute upper-left Y:/ {y=$4}
-    /^  Width:/ {w=$2}
-    /^  Height:/ {h=$2}
-    END {
-      if (x != "" && y != "" && w != "" && h != "") {
-        print x, y, w, h
-      }
-    }
-  '
-}
-
-screen_geometry() {
-  if command -v xdotool >/dev/null 2>&1; then
-    xdotool getdisplaygeometry 2>/dev/null || true
-    return 0
-  fi
-
-  xdpyinfo 2>/dev/null | awk '/dimensions:/ {split($2, a, "x"); print a[1], a[2]; exit}'
-}
-
-window_covers_screen() {
-  local win_id="$1"
-  local tolerance=2
-  local wx wy ww wh sw sh
-  local win_geo=""
-  local scr_geo=""
-
-  win_geo="$(window_geometry "${win_id}" || true)"
-  scr_geo="$(screen_geometry || true)"
-
-  [[ -n "${win_geo}" && -n "${scr_geo}" ]] || return 0
-
-  read -r wx wy ww wh <<<"${win_geo}"
-  read -r sw sh <<<"${scr_geo}"
-
-  (( wx >= -tolerance && wx <= tolerance )) || return 1
-  (( wy >= -tolerance && wy <= tolerance )) || return 1
-  (( ww >= sw - tolerance )) || return 1
-  (( wh >= sh - tolerance )) || return 1
-  return 0
-}
-
-wait_browser_window() {
-  local max_wait=150
-  local i win_id
-  for i in $(seq 1 "${max_wait}"); do
-    win_id="$(find_browser_window || true)"
-    if [[ -n "${win_id}" ]]; then
-      echo "${win_id}"
-      return 0
-    fi
-    sleep 0.1
-  done
-  return 1
-}
-
-watch_fullscreen() {
-  local browser_pid="$1"
-  local win_id=""
-  local poll_count=0
-  local new_win_id=""
-  local restart_reason=""
-
-  win_id="$(wait_browser_window || true)"
-  if [[ -z "${win_id}" ]]; then
-    log_monitor "browser window not found after launch"
-    kill "${browser_pid}" 2>/dev/null || true
-    return 0
-  fi
-
-  log_monitor "tracking browser window ${win_id}"
-
-  while kill -0 "${browser_pid}" 2>/dev/null; do
-    poll_count=$((poll_count + 1))
-
-    if (( poll_count % 10 == 0 )); then
-      new_win_id="$(find_browser_window || true)"
-      if [[ -n "${new_win_id}" && "${new_win_id}" != "${win_id}" ]]; then
-        log_monitor "browser window changed ${win_id} -> ${new_win_id}"
-        win_id="${new_win_id}"
-      fi
-    fi
-
-    if ! window_is_viewable "${win_id}"; then
-      restart_reason="window-not-viewable"
-    elif ! is_fullscreen "${win_id}"; then
-      restart_reason="fullscreen-exit"
-    elif ! window_is_foreground "${win_id}"; then
-      restart_reason="focus-lost"
-    elif ! window_covers_screen "${win_id}"; then
-      restart_reason="geometry-mismatch"
-    else
-      restart_reason=""
-    fi
-
-    if [[ -n "${restart_reason}" ]]; then
-      log_monitor "restart trigger: ${restart_reason}"
-      # Leave kiosk state -> immediately blank screen, then restart browser to avoid showing desktop.
-      hide_desktop_now
-      kill "${browser_pid}" 2>/dev/null || true
-      return 0
-    fi
-
-    sleep 0.2
-  done
-}
-
+# 離開全螢幕的監控由前端 JS 負責（/api/frontend/fullscreen_lost）。
+# 這裡只負責啟動 Firefox，若它退出就再啟動。systemd Restart=always 兜底。
 while true; do
-  if command -v wmctrl >/dev/null 2>&1 && command -v xprop >/dev/null 2>&1 && command -v xwininfo >/dev/null 2>&1; then
-    "${BROWSER_BIN}" --kiosk "${URL}" &
-    browser_pid="$!"
-    watch_fullscreen "${browser_pid}"
-    wait "${browser_pid}" 2>/dev/null || true
-  else
-    log_monitor "fallback mode: missing wmctrl/xprop/xwininfo, fullscreen monitoring disabled"
-    "${BROWSER_BIN}" --kiosk "${URL}" || true
-  fi
-  sleep 0.1
+  "${BROWSER_BIN}" --kiosk "${URL}" || true
+  sleep 2
 done
 EOF
   chmod +x "${HELPER_SCRIPT}"
+}
+
+install_firefox_userjs() {
+  # 找 Firefox default-release profile 並寫入 user.js，
+  # 避免崩潰後進入 Safe Mode 或顯示 session 還原對話框。
+  local profile_dir=""
+  local ff_base="${HOME}/.mozilla/firefox"
+
+  if [[ ! -d "${ff_base}" ]]; then
+    echo "[INFO] Firefox profile 目錄不存在，略過 user.js 安裝（Firefox 首次啟動後會自動建立）"
+    return 0
+  fi
+
+  # 優先選 default-release，其次選任意 profile
+  profile_dir="$(find "${ff_base}" -maxdepth 1 -type d \( -name "*.default-release" -o -name "*.default-release-*" \) | head -1)"
+  if [[ -z "${profile_dir}" ]]; then
+    profile_dir="$(find "${ff_base}" -maxdepth 1 -type d -name "*.default" | head -1)"
+  fi
+
+  if [[ -z "${profile_dir}" ]]; then
+    echo "[INFO] 找不到 Firefox profile，略過 user.js 安裝"
+    return 0
+  fi
+
+  cat > "${profile_dir}/user.js" << 'USERJS'
+// Kiosk: never enter safe mode after crashes
+user_pref("toolkit.startup.max_resumed_crashes", -1);
+user_pref("toolkit.startup.recent_crashes", 0);
+// Kiosk: no session restore / crash recovery prompt
+user_pref("browser.sessionstore.resume_from_crash", false);
+user_pref("browser.sessionstore.max_resumed_crashes", -1);
+// Kiosk: no default browser check or update prompts
+user_pref("browser.shell.checkDefaultBrowser", false);
+user_pref("app.update.auto", false);
+user_pref("browser.crashReports.unsubmittedCheck.autoSubmit2", false);
+USERJS
+  echo "[INFO] Firefox user.js 已寫入：${profile_dir}/user.js"
 }
 
 install_systemd_services() {
@@ -496,14 +339,6 @@ install_systemd_services() {
     return 1
   fi
 
-  if ! command -v wmctrl >/dev/null 2>&1 || ! command -v xprop >/dev/null 2>&1 || ! command -v xwininfo >/dev/null 2>&1; then
-    echo "[WARN] 缺少 wmctrl/xprop/xwininfo，將無法啟用完整 kiosk 狀態監測。"
-    echo "[WARN] 建議安裝：sudo apt-get install -y wmctrl x11-utils xdotool"
-  elif ! command -v xdotool >/dev/null 2>&1; then
-    echo "[WARN] 未安裝 xdotool，前景視窗判斷會改用 xprop fallback。"
-    echo "[WARN] 建議安裝：sudo apt-get install -y xdotool"
-  fi
-
   echo "[INFO] 服務將使用專案路徑：${PROJECT_DIR}"
   echo "[INFO] 後端 logs 路徑：${LOG_DIR}"
   if [[ "${PROJECT_DIR}" == "${ROOT_DIR}" && "${ROOT_DIR}" != "${USER_HOME}"/* ]]; then
@@ -513,6 +348,7 @@ install_systemd_services() {
 
   mkdir -p "${DEST_DIR}"
   install_browser_helper
+  install_firefox_userjs
   render_template "${SRC_DIR}/${PY_SERVICE}" "${DEST_DIR}/${PY_SERVICE}"
   render_template "${SRC_DIR}/${BROWSER_SERVICE}" "${DEST_DIR}/${BROWSER_SERVICE}"
 

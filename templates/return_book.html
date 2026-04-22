@@ -7,6 +7,7 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
     <!-- 引入 Font Awesome -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <script src="{{ url_for('static', filename='kiosk_watch.js') }}" defer></script>
 </head>
 <body>
     <!-- Service Suspended Overlay -->
@@ -352,53 +353,6 @@
         // 我們暫停 /api/status 的輪詢以避免與機器指令衝突。
         // SKIP_STATUS_UNTIL 存放取樣暫停到的時間（ms since epoch）。
         let SKIP_STATUS_UNTIL = 0;
-
-        // 全螢幕監測：若 kiosk 離開全螢幕，通知後端重啟服務。
-        let fullscreenNotifySent = false;
-        let fullscreenCheckTimer = null;
-
-        function isKioskFullscreenLike() {
-            // 部分瀏覽器不回報 fullscreenElement（例如 kiosk 參數），改用視窗尺寸做容錯判斷。
-            if (document.fullscreenElement) return true;
-            // 容錯設為 80px，避免 HiDPI 縮放或系統列造成誤判。
-            const tolerance = 80;
-            const targetW = Math.max(screen.width || 0, screen.availWidth || 0);
-            const targetH = Math.max(screen.height || 0, screen.availHeight || 0);
-            const wOk = (window.innerWidth || 0) >= (targetW - tolerance);
-            const hOk = (window.innerHeight || 0) >= (targetH - tolerance);
-            return wOk && hOk;
-        }
-
-        async function notifyFullscreenLost(trigger) {
-            if (fullscreenNotifySent) return;
-            fullscreenNotifySent = true;
-            try {
-                await fetch('/api/frontend/fullscreen_lost', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        trigger: trigger || 'unknown',
-                        path: window.location.pathname,
-                        ts: Date.now()
-                    })
-                });
-            } catch (e) {
-                console.warn('notifyFullscreenLost failed', e);
-            }
-        }
-
-        function scheduleFullscreenCheck(trigger, delayMs = 800) {
-            if (fullscreenNotifySent) return;
-            if (fullscreenCheckTimer) clearTimeout(fullscreenCheckTimer);
-            fullscreenCheckTimer = setTimeout(() => {
-                if (!isKioskFullscreenLike()) {
-                    notifyFullscreenLost(trigger);
-                }
-            }, delayMs);
-        }
-
-        // 前端重新啟動時清除「人工關閉」保護旗標，恢復一般監測行為。
-        fetch('/api/frontend/session_started', { method: 'POST' }).catch(() => {});
 
         /*
           Helper: 只在必要時執行喚醒並回原點 (wake_and_home)
@@ -1340,20 +1294,6 @@
             document.addEventListener('touchstart', tryWake);
             document.addEventListener('keypress', tryWake);
         })();
-
-        // 監聽影響 kiosk 視窗狀態的事件，離開全螢幕時通知後端。
-        // 注意：blur/focus/visibility-visible 不代表離開全螢幕（條碼掃描器會觸發 blur），故移除。
-        document.addEventListener('fullscreenchange', () => scheduleFullscreenCheck('fullscreenchange'));
-        document.addEventListener('visibilitychange', () => {
-            // 只在頁面被隱藏時檢查（visible 方向不代表全螢幕遺失）
-            if (document.visibilityState === 'hidden') {
-                scheduleFullscreenCheck('visibility-hidden', 300);
-            }
-        });
-        // resize 延遲拉長，避免 kiosk 啟動時視窗尺寸尚未穩定造成誤觸發。
-        window.addEventListener('resize', () => scheduleFullscreenCheck('resize', 3000));
-        // 初次載入延遲拉長，給 Firefox kiosk 足夠時間完成視窗配置。
-        scheduleFullscreenCheck('initial-load', 6000);
 
         // 每 15 秒檢查一次
         setInterval(checkSystemStatus, 15000);

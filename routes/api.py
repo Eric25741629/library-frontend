@@ -35,7 +35,7 @@ def _restart_frontend_services(trigger: str):
         time.sleep(1.0)
         env = _build_user_systemd_env()
         result = subprocess.run(
-            ['systemctl', '--user', 'restart', 'pyserver.service', 'kiosk-browser.service'],
+            ['systemctl', '--user', 'restart', 'kiosk-browser.service'],
             capture_output=True,
             text=True,
             timeout=20,
