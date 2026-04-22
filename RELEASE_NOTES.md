@@ -1,3 +1,34 @@
+# Release: 0.9.9 最終測試版
+
+發布日期: 2026-04-22
+
+狀態: Final Test / Kiosk security lockdown
+
+重點說明：
+- 重構 kiosk 全螢幕監控：舊版 shell X11 監控（`watch_fullscreen`）會在 Firefox 啟動期誤觸發
+  `focus-lost` / `window-not-viewable` / `geometry-mismatch`，造成 2026-04-21 18:21 的重啟
+  雪崩。改用前端 JS 的 `document.fullscreenElement` / `document.hasFocus()` / `visibilitychange`
+  偵測，訊號乾淨無假警報。
+- 新增焦點追蹤（資安需求）：視窗失焦 2.5 秒後若仍未拿回焦點則觸發重啟，並在啟動頭 15 秒保留緩衝
+  避免 Firefox 拿焦點前被誤判。
+- GNOME 快捷鍵鎖定：install 時用 `gsettings` 清空 40+ 個逃脫路徑（Super / Alt+Tab / Alt+F2 /
+  Alt+F4 / Super+A / Super+1..9 / 截圖 / 登出 / 控制中心等）。
+- 入侵視窗清理：後端收到 fullscreen_lost 時先 `pkill` 掉 12 種常見 GUI（gnome-control-center、
+  nautilus、gnome-terminal、gnome-calculator、xterm 等）再 `systemctl restart kiosk-browser`，
+  避免 Firefox 重生後入侵視窗還在前景。
+- 簡化 `install_user_services.sh` 中的 browser wrapper：從 220+ 行 X11 polling 縮成 `while true;
+  do firefox --kiosk URL; sleep 2; done`，systemd `Restart=always` 兜底。
+- 新增 pytest 回歸測試套件（42 cases）：覆蓋後端 debounce/cooldown、前端 JS 合約（必須有 blur
+  監聽 + hasFocus 二次確認 + 啟動緩衝）、GNOME lockdown install 正確性、入侵視窗 pkill 先於 restart。
+- 端到端驗證：在實機啟動 gnome-calculator 覆蓋 Firefox，觀察到完整鏈路成功觸發（JS 偵測 →
+  POST → pkill 計算機 → Firefox 重生）。
+
+已知限制：
+- Ctrl+Alt+F1..F6 切 TTY 與 Ctrl+Alt+Backspace 需改 `/etc/X11/xorg.conf.d/`（root 權限），
+  本版未自動處理。
+
+---
+
 # Release: 0.9.4
 
 發布日期: 2026-04-12
