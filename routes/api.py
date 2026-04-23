@@ -49,19 +49,20 @@ _INTRUDER_WINDOW_PROCS = (
 
 
 def _kill_intruder_windows():
-    for proc_name in _INTRUDER_WINDOW_PROCS:
-        try:
-            subprocess.run(['pkill', '-u', 'kiosk', '-f', proc_name],
-                           timeout=3, check=False)
-        except Exception as e:
-            logger.debug(f"pkill {proc_name} failed: {e}")
+    # 單次 pkill 用 ERE 交替 (a|b|c) 比串行 12 次快一個數量級；最壞情況從 36s 降到 3s。
+    pattern = '|'.join(_INTRUDER_WINDOW_PROCS)
+    try:
+        subprocess.run(['pkill', '-u', 'kiosk', '-f', pattern],
+                       timeout=3, check=False)
+    except Exception as e:
+        logger.debug(f"pkill intruder windows failed: {e}")
 
 
 def _restart_frontend_services(trigger: str):
     global _FRONTEND_RESTART_IN_PROGRESS
     try:
         # Give current HTTP response a short window to flush before restarting.
-        time.sleep(1.0)
+        time.sleep(0.3)
         # Defense in depth: kill any intruder windows that stole focus before
         # we restart Firefox, so Firefox returns to the top of the stack.
         _kill_intruder_windows()

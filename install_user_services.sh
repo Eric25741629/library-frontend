@@ -267,7 +267,17 @@ export DISPLAY="${DISPLAY:-:0}"
 
 # 等 X display 就緒，再給 GUI session 一點時間穩定。
 "${HOME}/bin/wait_gui_ready.sh" 180 || true
-sleep 10
+
+# 冷啟動時 GNOME/GDM 可能還沒穩，留 10 秒緩衝；熱重啟時 marker 已存在，只要 1 秒。
+# Marker 放 tmpfs，reboot 會自動清掉，保證冷啟動仍有完整緩衝。
+READY_MARKER="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/kiosk-browser-ready"
+if [[ -e "${READY_MARKER}" ]]; then
+  sleep 1
+else
+  sleep 10
+  mkdir -p "$(dirname "${READY_MARKER}")" 2>/dev/null || true
+  touch "${READY_MARKER}" 2>/dev/null || true
+fi
 
 # 等 Flask server 起來。
 for _ in $(seq 1 60); do
