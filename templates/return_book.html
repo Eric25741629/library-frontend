@@ -611,9 +611,46 @@
         }
 
         function hideLoading() {
+            stopReturnStageRotator();
             const overlay = document.getElementById('loading-overlay');
             if (overlay) overlay.style.display = 'none';
         }
+
+        // ── 還書流程階段標示 ──────────────────────────────────────────────────
+        // /api/return 端到端要 25-30 秒（關門 12s + sleep 2s + checkin 1-2s +
+        // 分類 5-10s）。原本整段都顯示「關門中」，使用者會以為當機。改成依時間
+        // 自動切換階段標題，讓使用者大致知道現在做到哪了。誤差 2-3 秒不會造成
+        // 困惑（分箱距離本來就會讓總時間浮動）。
+        let _returnStageTimers = [];
+
+        function stopReturnStageRotator() {
+            if (_returnStageTimers && _returnStageTimers.length) {
+                _returnStageTimers.forEach(t => clearTimeout(t));
+            }
+            _returnStageTimers = [];
+        }
+
+        function startReturnStageRotator() {
+            stopReturnStageRotator();
+            // 第 1 段：關門 + 偵測（0-14s）
+            const overlay = document.getElementById('loading-overlay');
+            const title = document.getElementById('loading-title');
+            const msg = document.getElementById('loading-message');
+            if (title) title.textContent = '投書口關閉中';
+            if (msg) msg.textContent = '請勿打開投書口';
+            if (overlay) overlay.style.display = 'flex';
+            // 第 2 段：館方系統 + 上磁（14-17s）
+            _returnStageTimers.push(setTimeout(() => {
+                if (title) title.textContent = '機器正在重新上磁';
+                if (msg) msg.textContent = '即將完成歸還';
+            }, 14000));
+            // 第 3 段：分類入箱（17s 起，直到 hideLoading）
+            _returnStageTimers.push(setTimeout(() => {
+                if (title) title.textContent = '書籍歸位分類中';
+                if (msg) msg.textContent = '請稍候';
+            }, 17000));
+        }
+
         // 兼容 wrapper：若 partials 中有實作，亦可覆寫 window.__rb_showLoading
 
         let autoRedirectTimer;
@@ -1052,8 +1089,9 @@
                 target_bin: b.target_bin || null
             }));
             // 直接執行還書 API（關門與檢查由後端處理）
-            // 顯示「關門中」以反映使用者實際期待的動作；若後端回報 BOOK_NOT_DETECTED 再顯示重新開門
-            showLoading('關門中，請稍候…', '關門中，請稍候');
+            // 用 stage rotator 依時間切換階段標題（關門 → 重新上磁 → 分類入箱）。
+            // 若後端回報 BOOK_NOT_DETECTED 再顯示重新開門。
+            startReturnStageRotator();
             try {
                 const response = await fetch('/api/return', {
                     method: 'POST',
@@ -1159,7 +1197,8 @@
         // 2. 書籍投入完成 -> 關門確認 -> 進入附件掃描 -> 驗證 -> 再開門 -> 提示投附件
         async function finishBookAndStartAttachment() {
             if(!currentProcessingBook) return;
-            showLoading('正在處理書籍，準備接收附件…');
+            // 同樣走還書流程，用 stage rotator 顯示關門 → 重新上磁 → 分類階段
+            startReturnStageRotator();
             
             try {
                 // 先呼叫 return API 歸還本體
@@ -1302,8 +1341,9 @@
                  return;
              }
              if (btn) btn.disabled = true;
-             showLoading('正在處理附件，請稍候…');
-   
+             // 附件也走還書 API，套用同一組 stage rotator
+             startReturnStageRotator();
+
              try {
                 // 再次呼叫 return API，但標記為附件 (後端僅記錄或再次 checkin)
                 const response = await fetch('/api/return', {
