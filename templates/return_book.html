@@ -430,8 +430,9 @@
             }
         }
 
-        // 顯示逾期 AF 訊息：不影響還書結果，只做提示，可手動點擊關閉，或預設 seconds 秒自動關閉
-        function showOverdueMessage(message, seconds = 10, onClose) {
+        // 顯示館方 AF/AG 訊息：不影響還書結果，只做提示，可手動點擊關閉，或預設 seconds 秒自動關閉
+        // noticeType: 'overdue' → 逾期提醒（橘）；其他/未指定 → 館方提醒（藍）
+        function showOverdueMessage(message, seconds = 10, onClose, noticeType) {
             try {
                 const modal = document.getElementById('temp-message-modal');
                 const body = document.getElementById('temp-message-body');
@@ -443,8 +444,13 @@
                 }
 
                 if (title) {
-                    title.innerHTML = '<i class="fas fa-exclamation-circle"></i> 逾期提醒';
-                    title.style.color = '#e67e22';
+                    if (noticeType === 'overdue') {
+                        title.innerHTML = '<i class="fas fa-exclamation-circle"></i> 逾期提醒';
+                        title.style.color = '#e67e22';
+                    } else {
+                        title.innerHTML = '<i class="fas fa-info-circle"></i> 館方提醒';
+                        title.style.color = '#2980b9';
+                    }
                 }
                 body.textContent = message;
                 modal.style.display = 'flex';
@@ -971,11 +977,11 @@
                     hideLoading();
                     const overdueMsg = result.overdue_message;
                     if (overdueMsg) {
-                        // 若館方回傳 AF/AG 逾期說明，先顯示提示 10 秒（或使用者點擊關閉），再進入成功畫面
+                        // 若館方回傳 AF/AG 提示訊息，先顯示提示 10 秒（或使用者點擊關閉），再進入成功畫面
                         showOverdueMessage(overdueMsg, 10, () => {
                             nextStep('step-success');
                             startAutoRedirect();
-                        });
+                        }, result.notice_type);
                     } else {
                         nextStep('step-success');
                         startAutoRedirect();
@@ -1095,7 +1101,7 @@
                 };
 
                 if (overdueMsg) {
-                    showOverdueMessage(overdueMsg, 10, proceedToAttachmentScan);
+                    showOverdueMessage(overdueMsg, 10, proceedToAttachmentScan, result.notice_type);
                 } else {
                     proceedToAttachmentScan();
                 }
@@ -1222,7 +1228,7 @@
                     };
 
                     if (overdueMsg) {
-                        showOverdueMessage(overdueMsg, 10, finishSuccessFlow);
+                        showOverdueMessage(overdueMsg, 10, finishSuccessFlow, result.notice_type);
                     } else {
                         finishSuccessFlow();
                     }

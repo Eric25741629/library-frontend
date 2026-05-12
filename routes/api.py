@@ -13,6 +13,30 @@ import config
 api_bp = Blueprint('api', __name__)
 logger = logging.getLogger('api')
 
+
+# SIP2 09/10 checkin 成功時，AF/AG 欄位實務上常是「還書成功」這種無資訊量的回音，
+# 也可能夾帶逾期罰款或預約到館等真正需要提示的訊息。直接把任何 AF/AG 都標成
+# 「逾期提醒」會造成沒過期的書也跳出逾期警告，所以先過濾無資訊量回音，再依關鍵字
+# 區分逾期與一般館方通知。
+_SIP2_TRIVIAL_NOTICES = {'還書成功', '還書完成', '歸還成功', '歸還完成',
+                         'check-in success', 'checkin success', 'success', 'ok'}
+_SIP2_OVERDUE_KEYWORDS = ('逾期', '過期', '罰款', '滯納', '超過借閱', '欠款')
+
+
+def _classify_sip2_notice(text):
+    """將 SIP2 AF/AG 文字分類；回傳 (text, 'overdue'|'notice') 或 None（無資訊量）。"""
+    if not text:
+        return None
+    s = str(text).strip()
+    if not s:
+        return None
+    stripped = s.replace('。', '').replace('.', '').strip().lower()
+    if stripped in _SIP2_TRIVIAL_NOTICES:
+        return None
+    if any(k in s for k in _SIP2_OVERDUE_KEYWORDS):
+        return (s, 'overdue')
+    return (s, 'notice')
+
 _FRONTEND_RESTART_LOCK = threading.Lock()
 _FRONTEND_RESTART_IN_PROGRESS = False
 _FRONTEND_RESTART_LAST_TS = 0.0
@@ -416,7 +440,8 @@ def return_book():
             return jsonify({"success": False, "message": "附件條碼與書籍不符，請重新掃描"}), 400
 
     returned_books = []
-    overdue_messages = []  # 蒐集還書成功但包含 AF/AG 訊息（例如逾期說明）
+    # 蒐集還書成功但包含 AF/AG 訊息；每筆為 (text, kind)，kind ∈ {'overdue','notice'}
+    notice_messages = []
     # 選擇分櫃（預設 1；若有提供 target_bin 則使用）
     selected_bin = None
     current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -563,10 +588,19 @@ def return_book():
 
                     if checkin_success:
                         logger.info(f"Real checkin successful for book: {b_id}")
-                        # 09/10 成功但 AF/AG 內若有逾期訊息，僅做提示，不阻擋還書
-                        overdue_text = af_msg or ag_msg
-                        if overdue_text:
-                            overdue_messages.append(overdue_text)
+                        # 09/10 成功，但 AF/AG 可能夾帶逾期說明或其他館方提醒。
+                        # 先去重（AF/AG 在館方系統常為同一句），再分類；純成功回音會被丟掉。
+                        seen = set()
+                        for raw in (af_msg, ag_msg):
+                            if not raw:
+                                continue
+                            key = str(raw).strip()
+                            if key in seen:
+                                continue
+                            seen.add(key)
+                            classified = _classify_sip2_notice(raw)
+                            if classified:
+                                notice_messages.append(classified)
                     else:
                         logger.warning(f"Real checkin failed for book: {b_id}")
                         all_checkin_success = False
@@ -679,12 +713,20 @@ def return_book():
     finally:
         conn.close()
 
+    # 選出最後一筆訊息給前端顯示；optimistic 優先選 overdue 類，再退回一般 notice。
+    selected_notice = None
+    if notice_messages:
+        overdue_only = [m for m in notice_messages if m[1] == 'overdue']
+        selected_notice = (overdue_only or notice_messages)[-1]
+
     return jsonify({
         "success": True,
         "message": f"成功歸還 {len(returned_books)} 本書籍",
         "data": returned_books,
-        # 若有 AF/AG 逾期說明，傳回前端顯示提示（不影響還書成功與否）
-        "overdue_message": overdue_messages[-1] if overdue_messages else None
+        # 若有 AF/AG 提示訊息，傳回前端顯示（不影響還書成功與否）
+        # overdue_message 為了向後相容保留；notice_type ∈ {'overdue','notice'}
+        "overdue_message": selected_notice[0] if selected_notice else None,
+        "notice_type": selected_notice[1] if selected_notice else None
     })
 
 @api_bp.route('/cancel', methods=['POST'])
