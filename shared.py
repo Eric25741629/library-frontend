@@ -518,6 +518,10 @@ _WATCHDOG_MACHINE_EMPTY_THRESHOLD = 3
 # poll thread 每 15s 一次 SIP2 health，連續 4 次失敗 ≈ 60 秒
 _WATCHDOG_SIP2_FAIL_THRESHOLD = 4
 _WATCHDOG_COOLDOWN_SEC = 12 * 3600  # 12 小時
+# 啟動寬限期：machine init 期間 state 查詢自然會回空字串（init 自己持鎖在跑
+# dep1+homing），此時不該被 watchdog 視為「卡住」並重複觸發。經實測 init 約
+# 24 秒完成，保守給 60 秒寬限。
+_WATCHDOG_STARTUP_GRACE_SEC = 60.0
 
 _watchdog_lock = threading.Lock()
 _consecutive_empty_state = 0
@@ -527,6 +531,8 @@ _watchdog_sip2_cooldown_until = 0.0
 # 記錄上次 log 過「冷卻中跳過」的閾值類型，避免每 5 秒重複噴 log
 _watchdog_machine_cooldown_logged = False
 _watchdog_sip2_cooldown_logged = False
+# 程序啟動時間；watchdog 在啟動寬限期內不觸發 recovery
+_watchdog_start_time = time.time()
 
 
 def _update_machine_empty_counter(raw_resp):
@@ -669,6 +675,12 @@ def _watchdog_tick(now=None):
     global _watchdog_machine_cooldown_logged, _watchdog_sip2_cooldown_logged
     if now is None:
         now = time.time()
+
+    # 啟動寬限期：pyserver 剛起來時 machine init 還在背景執行，state 查詢
+    # 自然會回空字串幾秒；此時不該被 watchdog 視為「卡住」而重複觸發 dep1+homing
+    # （init 本來就會做這件事）。實測 init 約 24 秒完成，保守給 60 秒。
+    if now - _watchdog_start_time < _WATCHDOG_STARTUP_GRACE_SEC:
+        return
 
     with _watchdog_lock:
         empty_state = _consecutive_empty_state

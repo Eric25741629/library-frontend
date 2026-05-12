@@ -95,6 +95,9 @@ def _reset_watchdog_state():
     shared._watchdog_sip2_cooldown_logged = False
     shared.WATCHDOG_AUTO_RECOVER_MACHINE = True
     shared.WATCHDOG_AUTO_RECOVER_SIP2 = True
+    # 把啟動寬限期挪到很久以前，否則 _watchdog_tick 會因為「啟動 60s 內」直接 return
+    _orig_start_time = shared._watchdog_start_time
+    shared._watchdog_start_time = 0.0
     yield
     shared._watchdog_reset_counters()
     shared._watchdog_machine_cooldown_until = 0.0
@@ -102,6 +105,7 @@ def _reset_watchdog_state():
     shared._watchdog_machine_cooldown_logged = False
     shared._watchdog_sip2_cooldown_logged = False
     shared.WATCHDOG_AUTO_RECOVER_MACHINE = True
+    shared._watchdog_start_time = _orig_start_time
     shared.WATCHDOG_AUTO_RECOVER_SIP2 = True
 
 
@@ -128,6 +132,37 @@ class TestCounters:
         assert shared._consecutive_sip2_fail == 3
         shared._update_sip2_fail_counter(True)
         assert shared._consecutive_sip2_fail == 0
+
+
+# ─── _watchdog_tick: startup grace ────────────────────────────────────────────
+
+class TestStartupGrace:
+    """啟動寬限期間 watchdog 不該觸發 recovery，避免 machine init 本身的
+    state-empty 過渡期被誤判為卡住。"""
+
+    def test_within_grace_does_not_trigger(self, fake_machine, fake_sip2):
+        with patch.object(shared, 'machine', fake_machine), \
+             patch.object(shared, 'sip2', fake_sip2), \
+             patch.object(shared, '_watchdog_recover_machine') as mock_m, \
+             patch.object(shared, '_watchdog_recover_sip2') as mock_s:
+            # 模擬程序剛啟動：start_time = now - 10s（小於 60s 寬限期）
+            now = 12345.0
+            shared._watchdog_start_time = now - 10.0
+            shared._consecutive_empty_state = 99  # 超過閾值
+            shared._consecutive_sip2_fail = 99
+            shared._watchdog_tick(now=now)
+            mock_m.assert_not_called()
+            mock_s.assert_not_called()
+
+    def test_after_grace_triggers(self, fake_machine):
+        with patch.object(shared, 'machine', fake_machine), \
+             patch.object(shared, '_watchdog_recover_machine') as mock_rec:
+            # 程序已啟動 120 秒，遠超 60s 寬限期
+            now = 12345.0
+            shared._watchdog_start_time = now - 120.0
+            shared._consecutive_empty_state = 3
+            shared._watchdog_tick(now=now)
+            mock_rec.assert_called_once()
 
 
 # ─── _watchdog_tick: machine recovery ─────────────────────────────────────────
