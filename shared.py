@@ -11,6 +11,8 @@ import threading
 import time
 from datetime import datetime, timedelta
 
+import serial
+
 # 引入控制器
 from machine_controller import MachineController
 from sip2_client import SIP2Client, MockSIP2Client
@@ -42,6 +44,10 @@ BARCODE_LOGIN_ENABLED = True
 REQUIRE_ADMIN_LOGIN = False
 DEFAULT_LANG = 'zh-TW'
 LOCALES = {}
+
+# Watchdog 自動恢復旗標（預設 ON；可在 config.yml 的 watchdog 區塊關閉）
+WATCHDOG_AUTO_RECOVER_MACHINE = True
+WATCHDOG_AUTO_RECOVER_SIP2 = True
 
 # 當管理端主動執行「關閉前端介面」時，持續抑制自動重啟流程，
 # 直到前端再次啟動後主動清除。
@@ -220,13 +226,14 @@ def is_manual_frontend_stop_active() -> bool:
 # --- 初始化函式 ---
 def load_config():
     global cfg, MAX_RETURN_LIMIT, BOOK_CHECK_ENABLED, ADMIN_USERNAME, ADMIN_PASSWORD, BARCODE_LOGIN_ENABLED, REQUIRE_ADMIN_LOGIN, DEFAULT_LANG
+    global WATCHDOG_AUTO_RECOVER_MACHINE, WATCHDOG_AUTO_RECOVER_SIP2
     if CONFIG_FILE.exists():
         try:
             cfg = yaml.safe_load(CONFIG_FILE.read_text(encoding='utf-8')) or {}
         except Exception as e:
             print(f"Failed to load config.yml: {e}")
             cfg = {}
-    
+
     MAX_RETURN_LIMIT = int(cfg.get('max_return_limit', 20))
     BOOK_CHECK_ENABLED = cfg.get('book_check_enabled', True)
     ADMIN_USERNAME = cfg.get('admin_username', "admin")
@@ -234,6 +241,9 @@ def load_config():
     BARCODE_LOGIN_ENABLED = cfg.get('barcode_login_enabled', True)
     REQUIRE_ADMIN_LOGIN = cfg.get('require_admin_login', False)
     DEFAULT_LANG = cfg.get('default_lang', 'zh-TW')
+    watchdog_cfg = cfg.get('watchdog', {}) if isinstance(cfg.get('watchdog', {}), dict) else {}
+    WATCHDOG_AUTO_RECOVER_MACHINE = bool(watchdog_cfg.get('auto_recover_machine', True))
+    WATCHDOG_AUTO_RECOVER_SIP2 = bool(watchdog_cfg.get('auto_recover_sip2', True))
 
 def load_locales():
     global LOCALES
@@ -416,13 +426,18 @@ def _notify_subscribers(snapshot):
 
 
 def _collect_machine_state():
-    """從 machine controller 與本地計算出機器相關欄位。不會打 SIP2。"""
+    """從 machine controller 與本地計算出機器相關欄位。不會打 SIP2。
+
+    回傳的 dict 內含一個 '_raw_state_resp' 私有欄位（不寫進 _state_cache，
+    僅給 poll thread 判斷『serial 是否空回應』用，watchdog counter 使用）。
+    """
     out = {
         'machine_ok': False,
         'machine_state': 'unavailable',
         'homing_in_progress': False,
         'is_homed': False,
         'machine_debug': {'ser_open': False, 'type': None},
+        '_raw_state_resp': None,
     }
     if machine is None:
         return out
@@ -440,6 +455,7 @@ def _collect_machine_state():
                 last_resp = machine.get_status()
             except Exception as e:
                 logger.debug(f"poll get_status failed: {e}")
+        out['_raw_state_resp'] = last_resp
 
         homing_flag = bool(getattr(machine, 'homing_in_progress', False))
         is_homed = bool(getattr(machine, 'is_homed', False))
@@ -484,6 +500,234 @@ def _collect_sip2_state():
         return {'library_ok': False}
 
 
+# ─── Watchdog（自動恢復） ─────────────────────────────────────────────────────
+#
+# 觀察 _state_poll_thread 累積的兩個故障計數器，連續超過閾值且未在冷卻窗口
+# 內，就觸發對應的恢復動作。
+#
+# 故障模式：
+#   1. /dev/uno serial 連續回空字串 → 機器卡住，需要關閉/重開 serial + dep1 + homing
+#   2. SIP2 health_check 連續失敗 → 圖書館伺服器連線掉，需要 reconnect + login
+#
+# 為避免抖動造成連續重啟，每種恢復動作各有自己獨立的 12 小時冷卻窗口；冷卻
+# 期間若閾值持續被觸發，只記錄一次 WARNING，不再嘗試恢復。
+
+_WATCHDOG_POLL_INTERVAL_SEC = 5.0
+# poll thread 每 1s 一次 machine state，連續 3 次空回應 ≈ 3 秒
+_WATCHDOG_MACHINE_EMPTY_THRESHOLD = 3
+# poll thread 每 15s 一次 SIP2 health，連續 4 次失敗 ≈ 60 秒
+_WATCHDOG_SIP2_FAIL_THRESHOLD = 4
+_WATCHDOG_COOLDOWN_SEC = 12 * 3600  # 12 小時
+
+_watchdog_lock = threading.Lock()
+_consecutive_empty_state = 0
+_consecutive_sip2_fail = 0
+_watchdog_machine_cooldown_until = 0.0
+_watchdog_sip2_cooldown_until = 0.0
+# 記錄上次 log 過「冷卻中跳過」的閾值類型，避免每 5 秒重複噴 log
+_watchdog_machine_cooldown_logged = False
+_watchdog_sip2_cooldown_logged = False
+
+
+def _update_machine_empty_counter(raw_resp):
+    """每次 poll thread 取得 machine state 後呼叫。raw_resp 為 None 或空字串
+    視為「空回應」，連續計數；任何非空回應重置為 0。"""
+    global _consecutive_empty_state
+    is_empty = raw_resp is None or (isinstance(raw_resp, str) and raw_resp.strip() == '')
+    with _watchdog_lock:
+        if is_empty:
+            _consecutive_empty_state += 1
+        else:
+            _consecutive_empty_state = 0
+
+
+def _update_sip2_fail_counter(library_ok):
+    """每次 poll thread 跑 SIP2 health_check 後呼叫。library_ok=False 累加；
+    True 重置為 0。單位是「15 秒間隔」，不是秒。"""
+    global _consecutive_sip2_fail
+    with _watchdog_lock:
+        if library_ok:
+            _consecutive_sip2_fail = 0
+        else:
+            _consecutive_sip2_fail += 1
+
+
+def _watchdog_reset_counters():
+    """測試 / 手動恢復後可呼叫，把計數器歸零。"""
+    global _consecutive_empty_state, _consecutive_sip2_fail
+    with _watchdog_lock:
+        _consecutive_empty_state = 0
+        _consecutive_sip2_fail = 0
+
+
+def _watchdog_recover_machine():
+    """關閉並重開 serial，重送 dep1 + homing。整段在 machine.lock 內執行。
+
+    若 config.yml 把 watchdog.auto_recover_machine 設為 false，只 log 不執行。"""
+    n = _consecutive_empty_state
+    logger.warning(f"watchdog: machine stuck ({n} empty states), triggering reset")
+    if not WATCHDOG_AUTO_RECOVER_MACHINE:
+        logger.warning("watchdog: machine recovery (auto-recover disabled, skipping)")
+        return
+    if machine is None:
+        logger.warning("watchdog: machine recovery skipped (machine controller not initialized)")
+        return
+
+    try:
+        # machine.lock 是 RLock，安全可重入
+        with machine.lock:
+            # 1) 關閉現有 serial
+            ser = getattr(machine, 'ser', None)
+            try:
+                if ser is not None and getattr(ser, 'is_open', False):
+                    ser.close()
+                    logger.warning("watchdog: machine recovery - serial closed")
+            except Exception as e:
+                logger.warning(f"watchdog: machine recovery - serial close failed: {e}")
+
+            # 2) 重新開啟 serial
+            try:
+                if not getattr(machine, 'simulate', False):
+                    machine.ser = serial.Serial(
+                        port=machine.port,
+                        baudrate=machine.baudrate,
+                        bytesize=serial.EIGHTBITS,
+                        parity=serial.PARITY_NONE,
+                        stopbits=serial.STOPBITS_ONE,
+                        timeout=2,
+                    )
+                    logger.warning(
+                        f"watchdog: machine recovery - serial reopened on {machine.port}"
+                    )
+            except Exception as e:
+                logger.error(f"watchdog: machine recovery - serial reopen failed: {e}")
+                return
+
+            # 3) 送 dep1 (喚醒)
+            try:
+                machine._send_command("dep1")
+                logger.warning("watchdog: machine recovery - dep1 sent")
+            except Exception as e:
+                logger.error(f"watchdog: machine recovery - dep1 failed: {e}")
+
+            # 4) 送 homing
+            try:
+                machine._send_command("homing")
+                logger.warning("watchdog: machine recovery - homing sent")
+            except Exception as e:
+                logger.error(f"watchdog: machine recovery - homing failed: {e}")
+    except Exception as e:
+        logger.error(f"watchdog: machine recovery unexpected error: {e}")
+        return
+
+    logger.warning("watchdog: machine recovery completed")
+
+
+def _watchdog_recover_sip2():
+    """嘗試取得 sip2 IO lock（5 秒 timeout），拿到後呼叫 init_sip2_client 重連。
+
+    若拿不到 lock（表示有別的請求正在傳輸中），跳過這次觸發，下個 5 秒 tick
+    若計數器仍超標會再試。"""
+    n = _consecutive_sip2_fail
+    logger.warning(f"watchdog: SIP2 disconnected ~{n*_SIP2_POLL_EVERY_N_TICKS}s, triggering reconnect")
+    if not WATCHDOG_AUTO_RECOVER_SIP2:
+        logger.warning("watchdog: SIP2 recovery (auto-recover disabled, skipping)")
+        return
+
+    io_lock = getattr(sip2, '_io_lock', None) if sip2 is not None else None
+    if io_lock is None:
+        logger.warning("watchdog: SIP2 recovery - no io_lock available, calling init_sip2_client directly")
+        try:
+            init_sip2_client()
+            logger.warning("watchdog: SIP2 recovery completed")
+        except Exception as e:
+            logger.error(f"watchdog: SIP2 recovery failed: {e}")
+        return
+
+    acquired = io_lock.acquire(timeout=5)
+    if not acquired:
+        logger.warning("watchdog: SIP2 recovery - could not acquire io_lock in 5s, will retry on next tick")
+        return
+    try:
+        try:
+            init_sip2_client()
+            logger.warning("watchdog: SIP2 recovery completed")
+        except Exception as e:
+            logger.error(f"watchdog: SIP2 recovery failed: {e}")
+    finally:
+        try:
+            io_lock.release()
+        except Exception:
+            pass
+
+
+def _watchdog_tick(now=None):
+    """單次 watchdog 評估邏輯：檢查計數器、冷卻，必要時呼叫恢復函式。
+
+    抽成獨立函式以便測試可直接同步呼叫（不必啟動 thread）。"""
+    global _watchdog_machine_cooldown_until, _watchdog_sip2_cooldown_until
+    global _watchdog_machine_cooldown_logged, _watchdog_sip2_cooldown_logged
+    if now is None:
+        now = time.time()
+
+    with _watchdog_lock:
+        empty_state = _consecutive_empty_state
+        sip2_fail = _consecutive_sip2_fail
+        machine_cd_until = _watchdog_machine_cooldown_until
+        sip2_cd_until = _watchdog_sip2_cooldown_until
+
+    # === Machine ===
+    if empty_state >= _WATCHDOG_MACHINE_EMPTY_THRESHOLD:
+        if now < machine_cd_until:
+            if not _watchdog_machine_cooldown_logged:
+                hours_remaining = max(0.0, (machine_cd_until - now) / 3600.0)
+                logger.warning(
+                    f"watchdog: machine threshold breached but in cooldown "
+                    f"({hours_remaining:.1f} hours remaining)"
+                )
+                _watchdog_machine_cooldown_logged = True
+        else:
+            try:
+                _watchdog_recover_machine()
+            finally:
+                with _watchdog_lock:
+                    _watchdog_machine_cooldown_until = now + _WATCHDOG_COOLDOWN_SEC
+                _watchdog_machine_cooldown_logged = False
+    else:
+        # 閾值已未達標 → 允許下次冷卻過後再 log 一次
+        _watchdog_machine_cooldown_logged = False
+
+    # === SIP2 ===
+    if sip2_fail >= _WATCHDOG_SIP2_FAIL_THRESHOLD:
+        if now < sip2_cd_until:
+            if not _watchdog_sip2_cooldown_logged:
+                hours_remaining = max(0.0, (sip2_cd_until - now) / 3600.0)
+                logger.warning(
+                    f"watchdog: sip2 threshold breached but in cooldown "
+                    f"({hours_remaining:.1f} hours remaining)"
+                )
+                _watchdog_sip2_cooldown_logged = True
+        else:
+            try:
+                _watchdog_recover_sip2()
+            finally:
+                with _watchdog_lock:
+                    _watchdog_sip2_cooldown_until = now + _WATCHDOG_COOLDOWN_SEC
+                _watchdog_sip2_cooldown_logged = False
+    else:
+        _watchdog_sip2_cooldown_logged = False
+
+
+def _watchdog_thread():
+    """背景 thread：每 5 秒檢查一次計數器，必要時觸發恢復。"""
+    while True:
+        try:
+            _watchdog_tick()
+        except Exception as e:
+            logger.error(f"_watchdog_thread error: {e}")
+        time.sleep(_WATCHDOG_POLL_INTERVAL_SEC)
+
+
 def _state_poll_thread():
     """背景 thread，每秒打 serial 拿狀態，每 15 秒打 SIP2 拿連線狀態。
     狀態變化時呼叫 _notify_subscribers 把新快照推給訂閱者。"""
@@ -492,13 +736,21 @@ def _state_poll_thread():
         try:
             tick += 1
             machine_part = _collect_machine_state()
+            # 抽出 watchdog 用的 raw response，並從寫入 cache 的字典裡移除
+            raw_state_resp = machine_part.pop('_raw_state_resp', None)
+            _update_machine_empty_counter(raw_state_resp)
 
             # SIP2 健康檢查節流：tick=1 立即跑一次，之後每 15 tick 一次
+            sip2_polled = False
             if tick == 1 or tick % _SIP2_POLL_EVERY_N_TICKS == 0:
                 sip2_part = _collect_sip2_state()
+                sip2_polled = True
             else:
                 with _state_cache_lock:
                     sip2_part = {'library_ok': _state_cache.get('library_ok', False)}
+
+            if sip2_polled:
+                _update_sip2_fail_counter(bool(sip2_part.get('library_ok')))
 
             # 本地計算欄位（檔案 / sqlite，便宜）
             try:
@@ -543,6 +795,8 @@ def start_background_tasks():
     threading.Thread(target=check_machine_idle, daemon=True).start()
     # 3. 狀態快取 polling（serial / SIP2 每秒同步進 cache，狀態變化推 SSE 訂閱者）
     threading.Thread(target=_state_poll_thread, daemon=True).start()
+    # 4. Watchdog：每 5 秒檢查 poll thread 累積的計數器，連續故障時觸發恢復
+    threading.Thread(target=_watchdog_thread, daemon=True).start()
 
 # --- 主初始化入口 ---
 def init_shared():
