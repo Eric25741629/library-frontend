@@ -430,8 +430,14 @@
             }
         }
 
-        // 顯示館方 AF/AG 訊息：不影響還書結果，只做提示，可手動點擊關閉，或預設 seconds 秒自動關閉
-        // noticeType: 'overdue' → 逾期提醒（橘）；其他/未指定 → 館方提醒（藍）
+        // 顯示館方 AF/AG 訊息或錯誤分類提示：不一定影響還書結果，只做提示，可手動點擊關閉
+        // noticeType:
+        //   'overdue' → 逾期提醒（橘）
+        //   'error'   → 錯誤提醒（紅）— 用於機器錯誤等需明顯標示的情境
+        //   其他/未指定 → 館方提醒（藍）
+        // seconds:
+        //   > 0       → 經 seconds 秒後自動關閉
+        //   0 / null  → STICKY：不自動關閉，只能點擊關閉（給 MACHINE_ERROR_STATE_0 這類需櫃台處理的情境用）
         function showOverdueMessage(message, seconds = 10, onClose, noticeType) {
             try {
                 const modal = document.getElementById('temp-message-modal');
@@ -447,6 +453,9 @@
                     if (noticeType === 'overdue') {
                         title.innerHTML = '<i class="fas fa-exclamation-circle"></i> 逾期提醒';
                         title.style.color = '#e67e22';
+                    } else if (noticeType === 'error') {
+                        title.innerHTML = '<i class="fas fa-times-circle"></i> 機器錯誤';
+                        title.style.color = '#dc3545';
                     } else {
                         title.innerHTML = '<i class="fas fa-info-circle"></i> 館方提醒';
                         title.style.color = '#2980b9';
@@ -469,10 +478,65 @@
                 }
 
                 modal.addEventListener('click', clickHandler);
-                setTimeout(doClose, (seconds || 10) * 1000);
+                // sticky 模式：seconds 為 0 / null / undefined 時不自動關閉，等使用者點擊
+                if (seconds && seconds > 0) {
+                    setTimeout(doClose, seconds * 1000);
+                }
             } catch (e) {
                 console.error('showOverdueMessage failed', e);
                 try { alert(message); if (typeof onClose === 'function') onClose(); } catch(err){}
+            }
+        }
+
+        // 處理 /api/return 失敗時的分類錯誤訊息。
+        // 若 result.code 屬於本函式已知的類別，會顯示對應 modal 並回傳 true；
+        // 呼叫端就不應再 alert / 跳轉，直接讓 modal 的 onClose 回呼接手後續流程。
+        // 若回傳 false 表示這個 code 不在本函式處理範圍，呼叫端維持原有錯誤處理。
+        //
+        // returnToWelcome: 一個 callback，模態關閉後要回到歡迎頁時呼叫（通常是 resetFlow / nextStep('step-welcome')）。
+        function handleReturnFailureCode(result, returnToWelcome) {
+            if (!result || !result.code) return false;
+            const msg = result.message || '還書失敗';
+            const back = (typeof returnToWelcome === 'function') ? returnToWelcome : () => nextStep('step-welcome');
+            switch (result.code) {
+                case 'LIBRARY_REJECT_ALREADY_RETURNED':
+                    // 書已歸還：後端已重開門，10 秒禮貌 modal 後回歡迎頁
+                    showOverdueMessage(
+                        msg || '本書系統紀錄已歸還，請取回書本後洽櫃台確認。',
+                        10,
+                        back,
+                        'notice'
+                    );
+                    return true;
+                case 'LIBRARY_REJECT_OTHER':
+                    // 其他圖書館拒絕：後端已重開門，10 秒禮貌 modal 後回歡迎頁
+                    showOverdueMessage(
+                        msg || '圖書館系統拒絕本次還書，請取回書本並洽詢櫃台。',
+                        10,
+                        back,
+                        'notice'
+                    );
+                    return true;
+                case 'MACHINE_ERROR_STATE_0':
+                    // 機器卡住：sticky modal，不自動回首頁，等櫃台處理
+                    showOverdueMessage(
+                        msg || '機器發生錯誤，請洽櫃台處理。',
+                        0,  // sticky
+                        null,
+                        'error'
+                    );
+                    return true;
+                case 'SIP2_DISCONNECTED':
+                    // 圖書館連線異常：後端已重開門，10 秒禮貌 modal 後回歡迎頁
+                    showOverdueMessage(
+                        msg || '圖書館系統暫時無法連線，請稍後再試或洽櫃台。',
+                        10,
+                        back,
+                        'notice'
+                    );
+                    return true;
+                default:
+                    return false;
             }
         }
 
@@ -1017,6 +1081,14 @@
                     if (result.code === 'BOOK_NOT_DETECTED') {
                         alert(result.message + "\n\n(投書口已重新開啟，請重新放入)");
                         // 停留在原步驟，不跳轉，讓使用者可以再次點擊「完成投入」
+                    } else if (handleReturnFailureCode(result, () => {
+                        // 模態關閉後：清空本地暫存並回到歡迎頁；後端已重開門讓使用者取回書本
+                        scannedBooks = [];
+                        currentProcessingBook = null;
+                        updateBookList();
+                        nextStep('step-welcome');
+                    })) {
+                        // 已由 handleReturnFailureCode 接手顯示，不再彈出 alert
                     } else {
                         alert(result.message || '還書失敗');
                     }
@@ -1109,8 +1181,20 @@
                 
                 if(!result.success) {
                     hideLoading();
-                    alert(result.message || '書籍歸還失敗');
-                    resetFlow();
+                    // 先嘗試用分類錯誤訊息處理；若不是已知分類則 fallback 到 alert
+                    const handled = handleReturnFailureCode(result, () => {
+                        // 模態關閉後：清掉附件流程的暫存，回到歡迎頁。
+                        // 後端對 LIBRARY_REJECT_* / SIP2_DISCONNECTED 已重開門讓使用者取回書本。
+                        currentProcessingBook = null;
+                        currentAttachmentBarcode = null;
+                        scannedBooks = [];
+                        updateBookList();
+                        nextStep('step-welcome');
+                    });
+                    if (!handled) {
+                        alert(result.message || '書籍歸還失敗');
+                        resetFlow();
+                    }
                     return;
                 }
 
@@ -1259,8 +1343,18 @@
                     }
                 } else {
                     hideLoading();
-                    alert(result.message || '附件處理異常，但書籍已歸還。');
-                    nextStep('step-success');
+                    // 附件階段失敗：先嘗試分類錯誤；MACHINE_ERROR_STATE_0 必須 sticky，不能跳到 success
+                    const handled = handleReturnFailureCode(result, () => {
+                        currentAttachmentBarcode = null;
+                        currentProcessingBook = null;
+                        scannedBooks = [];
+                        updateBookList();
+                        nextStep('step-welcome');
+                    });
+                    if (!handled) {
+                        alert(result.message || '附件處理異常，但書籍已歸還。');
+                        nextStep('step-success');
+                    }
                 }
              } catch(e) {
                  hideLoading();

@@ -24,6 +24,35 @@ _SIP2_TRIVIAL_NOTICES = {'還書成功', '還書完成', '歸還成功', '歸還
                          'check-in success', 'checkin success', 'success', 'ok'}
 _SIP2_OVERDUE_KEYWORDS = ('逾期', '過期', '罰款', '滯納', '超過借閱', '欠款')
 
+# 圖書館系統拒絕還書時，若 AF/AG/error_message 含下列任一關鍵字，視為「已歸還」case。
+# 實務上常見的情境是：第一次掃描→關門→checkin 成功，但回應在網路上掉了，前端誤判失敗
+# 觸發重開門讓使用者再放一次；第二次 checkin 時 SIP2 server 回 "館藏資料異常請洽櫃台"
+# 或 "已歸還" 之類的訊息。此時應提示使用者「本書已成功歸還，請取回書本」，而不是讓
+# 櫃台以為「圖書館系統拒絕」造成的一般失敗。
+_LIBRARY_ALREADY_RETURNED_KEYWORDS = ('館藏資料異常', '已歸還', '不在借出')
+
+
+def _is_already_returned_reject(*messages):
+    """判斷 SIP2 checkin 失敗訊息是否屬於『書已歸還』類別。"""
+    for raw in messages:
+        if not raw:
+            continue
+        s = str(raw)
+        for kw in _LIBRARY_ALREADY_RETURNED_KEYWORDS:
+            if kw in s:
+                return True
+    return False
+
+
+def _is_machine_error_state_0(resp):
+    """判斷機器控制器回應是否包含 'error state 0'（機器卡在錯誤狀態）。"""
+    if resp is None:
+        return False
+    try:
+        return "error state 0" in str(resp).lower()
+    except Exception:
+        return False
+
 
 # 條碼開頭代表 CD 光碟附件的前綴；V / VH / D 各自獨立分類，不混為一談。
 # 比對順序很重要：較長的 VH 必須先比對，否則會被 V 吃掉，導致無法區分 VH 與單純的 V。
@@ -471,20 +500,39 @@ def return_book():
     try:
         status = machine.get_status()
         is_state_3 = False
-        
+
         s_status = str(status).strip()
+        # 機器若回報 "error state 0"，代表上一輪 cancel/reopen 流程卡住了，現在指令會被拒。
+        # 此時不可繼續還書（會把書吞掉但 checkin 卻沒做），改回傳 MACHINE_ERROR_STATE_0
+        # 讓櫃台人員介入。
+        if _is_machine_error_state_0(s_status):
+            logger.error(f"Machine reported error state 0 on pre-close status check: {status}")
+            return jsonify({
+                "success": False,
+                "code": "MACHINE_ERROR_STATE_0",
+                "message": "機器發生錯誤，請洽櫃台處理。"
+            }), 503
+
         if s_status.isdigit() and int(s_status) == getattr(machine, 'STATE_OPENED', 3):
             is_state_3 = True
         elif "opened" in s_status.lower() or "error state 3" in s_status.lower():
             is_state_3 = True
-            
+
         if is_state_3:
             logger.info(f"Machine is in state {status} (OPENED). Proceeding to close directly.")
         else:
             logger.warning(f"Machine state is '{status}' (Not OPENED). Triggering HOMING as safety fallback.")
             resp = machine._send_command("homing")
             logger.info(f"Fallback homing response: {resp}")
-            
+            # 即便走到 homing fallback，也要檢查 homing 回應是否帶有 error state 0
+            if _is_machine_error_state_0(resp):
+                logger.error(f"Machine reported error state 0 during fallback homing: {resp}")
+                return jsonify({
+                    "success": False,
+                    "code": "MACHINE_ERROR_STATE_0",
+                    "message": "機器發生錯誤，請洽櫃台處理。"
+                }), 503
+
     except Exception as e:
         logger.error(f"Pre-close status check failed: {e}. Defaulting to HOMING.")
         try:
@@ -562,6 +610,11 @@ def return_book():
         # 紀錄是否有還書失敗；若失敗則不做分類並重新開門，讓使用者取回書本洽詢櫃台
         all_checkin_success = True
         failed_books = []
+        # 還書失敗時用來分類錯誤原因；預設 CHECKIN_FAILED（舊行為）。
+        # 之後會升級為更精確的 code（LIBRARY_REJECT_ALREADY_RETURNED / LIBRARY_REJECT_OTHER /
+        # SIP2_DISCONNECTED），以便前端對不同失敗顯示不同訊息。
+        failure_code = "CHECKIN_FAILED"
+        failure_message = "圖書館系統拒絕本次還書，請取回書本並洽詢櫃台。"
 
         for b_id in book_ids:
             checkin_success = True
@@ -570,16 +623,28 @@ def return_book():
                 config.reload_config()  # 重新載入配置
                 if config.LIBRARY_CHECKIN_ENABLED and shared.sip2:
                     logger.info(f"Executing real checkin for book: {b_id}")
-                    checkin_result = shared.sip2.checkin_book(b_id)
+                    try:
+                        checkin_result = shared.sip2.checkin_book(b_id)
+                    except Exception as ex:
+                        # SIP2 socket 在還書中途斷線等；視為連線異常而非「圖書館拒絕」
+                        logger.error(f"SIP2 checkin raised for {b_id}: {ex}")
+                        checkin_result = None
 
                     # 新版 checkin_book 會回傳 dict，內含 success 與 AF/AG 訊息；
-                    # 若為舊版 bool 也能相容處理。
+                    # 若為舊版 bool 也能相容處理；None 則代表 SIP2 沒有回應。
                     af_msg = None
                     ag_msg = None
-                    if isinstance(checkin_result, dict):
+                    error_msg = None
+                    if checkin_result is None:
+                        # 完全沒有回應 → 視為 SIP2 連線異常
+                        checkin_success = False
+                        failure_code = "SIP2_DISCONNECTED"
+                        failure_message = "圖書館系統暫時無法連線，請稍後再試或洽櫃台。"
+                    elif isinstance(checkin_result, dict):
                         checkin_success = bool(checkin_result.get('success'))
                         af_msg = checkin_result.get('af_message')
                         ag_msg = checkin_result.get('ag_message')
+                        error_msg = checkin_result.get('error_message')
                     else:
                         checkin_success = bool(checkin_result)
 
@@ -599,9 +664,24 @@ def return_book():
                             if classified:
                                 notice_messages.append(classified)
                     else:
-                        logger.warning(f"Real checkin failed for book: {b_id}")
+                        logger.warning(f"Real checkin failed for book: {b_id} (af={af_msg!r} ag={ag_msg!r} err={error_msg!r})")
                         all_checkin_success = False
                         failed_books.append(b_id)
+                        # 已是 SIP2_DISCONNECTED 的情況不再覆寫
+                        if failure_code != "SIP2_DISCONNECTED":
+                            if _is_already_returned_reject(af_msg, ag_msg, error_msg):
+                                failure_code = "LIBRARY_REJECT_ALREADY_RETURNED"
+                                failure_message = "本書系統紀錄已歸還，請取回書本後洽櫃台確認。"
+                            else:
+                                # AF/AG/error 都不是「已歸還」類別 → 一般圖書館拒絕
+                                failure_code = "LIBRARY_REJECT_OTHER"
+                                # 優先使用 SIP2 server 給的具體 error_message，沒有再 fallback
+                                # 到 AF / AG / 預設訊息。
+                                detail = error_msg or af_msg or ag_msg
+                                if detail:
+                                    failure_message = f"圖書館系統拒絕本次還書：{detail}，請取回書本並洽櫃台。"
+                                else:
+                                    failure_message = "圖書館系統拒絕本次還書，請取回書本並洽詢櫃台。"
                         break
                 elif shared.sip2:
                     logger.info(f"Real checkin disabled - simulating checkin for book: {b_id}")
@@ -611,6 +691,8 @@ def return_book():
                     checkin_success = False
                     all_checkin_success = False
                     failed_books.append(b_id)
+                    failure_code = "SIP2_DISCONNECTED"
+                    failure_message = "圖書館系統暫時無法連線，請稍後再試或洽櫃台。"
                     break
 
             if checkin_success:
@@ -656,11 +738,11 @@ def return_book():
         # 若有任何一本書還書指令失敗，則：
         # 1) 回滾本次交易，不記錄到本地 box_inventory
         # 2) 重新開啟投書口，讓使用者取回書本
-        # 3) 回傳錯誤訊息，提醒使用者洽詢櫃台
+        # 3) 回傳錯誤訊息與分類 code，提醒使用者洽詢櫃台
         if not all_checkin_success:
             conn.rollback()
             try:
-                logger.info(f"Checkin failed for books {failed_books}; reopening door to let user retrieve items.")
+                logger.info(f"Checkin failed for books {failed_books} (code={failure_code}); reopening door to let user retrieve items.")
 
                 def async_reopen_after_checkin_error():
                     try:
@@ -675,8 +757,8 @@ def return_book():
 
             return jsonify({
                 "success": False,
-                "message": "圖書館系統拒絕本次還書，請取回書本並洽詢櫃台。",
-                "code": "CHECKIN_FAILED",
+                "message": failure_message,
+                "code": failure_code,
                 "failed_books": failed_books
             }), 400
         
