@@ -5,6 +5,7 @@ import yaml
 import logging
 import os
 import subprocess
+import time
 from pathlib import Path
 
 import shared
@@ -598,20 +599,309 @@ def test_library_conn():
     try:
         if mock_enabled or str(host).lower() == 'mock':
              return jsonify({"success": True, "message": "Mock 連線測試成功 (強制 Mock 模式)"})
-             
+
         # Import SIP2Client specifically for testing to avoid shared instance modification
         from sip2_client import SIP2Client
         test_client = SIP2Client(host, int(port), user, pwd, institution_id=inst)
         if test_client.connect():
             login_ok = test_client.login()
             test_client.close()
-            
+
             if login_ok:
                 return jsonify({"success": True, "message": f"連線與登入成功 ({host}:{port})"})
             else:
                 return jsonify({"success": False, "message": f"連線成功但登入失敗 (Check User/Pass/AO)"})
         else:
              return jsonify({"success": False, "message": f"無法建立連線 ({host}:{port})"})
-             
+
     except Exception as e:
         return jsonify({"success": False, "message": f"測試例外: {e}"}), 500
+
+
+# ─── 緊急恢復端點 (Admin Recovery) ─────────────────────────────────────────────
+#
+# 當機器卡在錯誤狀態（例如 "error state 0" 因 serial glitch）時，現場操作員
+# 過去必須 ssh 進機台執行 `systemctl --user restart pyserver.service` 才能
+# 恢復。以下四個端點讓管理員可以在後台 UI 直接點按執行修復動作，不必下指令列。
+#
+# 重要原則：
+#   1. 全部為 admin 專屬，沿用 admin_api_bp.before_request 的 session 檢查。
+#   2. 全部為「人工觸發」，不會被自動執行（自動恢復屬於另一支 agent 的任務）。
+#   3. 整個 request 最長 35 秒，超時直接回傳訊息要求人工檢查，避免 UI 永遠
+#      在等。
+#   4. 所有狀況都會 log 至 INFO，方便事後對照當天的時間軸。
+
+_RECOVERY_OVERALL_TIMEOUT_SEC = 35
+
+
+def _send_with_deadline(cmd, deadline):
+    """在剩餘時間內呼叫 machine._send_command。
+
+    回傳 (resp, timed_out)：若已超過 deadline 則回傳 (None, True)，
+    呼叫端應在此情況下立即結束流程。
+    """
+    if time.time() >= deadline:
+        return None, True
+    resp = shared.machine._send_command(cmd)
+    return resp, False
+
+
+@admin_api_bp.route('/machine/reset', methods=['POST'])
+def machine_reset():
+    """完整重置機器：關閉序列埠 -> 重新開啟 -> dep1 -> homing。
+
+    使用情境：序列埠卡死、機器狀態 unknown / error / 0 時可由管理員一鍵
+    重置。會佔用 shared.machine.lock (RLock)，避免與正在執行中的還書動作
+    搶序列埠。
+    """
+    logger.info("admin recovery triggered: machine/reset")
+    start_ts = time.time()
+    deadline = start_ts + _RECOVERY_OVERALL_TIMEOUT_SEC
+    steps = []
+
+    try:
+        if shared.machine is None:
+            return jsonify({
+                "success": False,
+                "message": "機器控制器尚未初始化",
+                "steps": steps,
+            })
+
+        with shared.machine.lock:
+            # 1. 關閉現有序列埠
+            try:
+                if shared.machine.ser and shared.machine.ser.is_open:
+                    shared.machine.ser.close()
+                    steps.append({"step": "close_serial", "ok": True})
+                else:
+                    steps.append({"step": "close_serial", "ok": True, "note": "already closed"})
+            except Exception as e:
+                logger.error(f"machine/reset close_serial error: {e}")
+                steps.append({"step": "close_serial", "ok": False, "error": str(e)})
+
+            if time.time() > deadline:
+                return jsonify({
+                    "success": False,
+                    "message": "重置流程耗時超過 35 秒，請手動檢查",
+                    "steps": steps,
+                })
+
+            # 2. 重新開啟序列埠（沿用 MachineController.__init__ 的參數）
+            import serial as _serial
+            try:
+                shared.machine.ser = _serial.Serial(
+                    port=shared.machine.port,
+                    baudrate=shared.machine.baudrate,
+                    bytesize=_serial.EIGHTBITS,
+                    parity=_serial.PARITY_NONE,
+                    stopbits=_serial.STOPBITS_ONE,
+                    timeout=2,
+                )
+                steps.append({"step": "reopen_serial", "ok": True,
+                              "port": shared.machine.port,
+                              "baudrate": shared.machine.baudrate})
+            except Exception as e:
+                logger.error(f"machine/reset reopen_serial error: {e}")
+                steps.append({"step": "reopen_serial", "ok": False, "error": str(e)})
+                return jsonify({
+                    "success": False,
+                    "message": f"重新開啟序列埠失敗: {e}",
+                    "steps": steps,
+                })
+
+            if time.time() > deadline:
+                return jsonify({
+                    "success": False,
+                    "message": "重置流程耗時超過 35 秒，請手動檢查",
+                    "steps": steps,
+                })
+
+            # 3. dep1：等待 "power on"，最多 10 秒
+            dep_deadline = min(time.time() + 10, deadline)
+            dep_resp, timed_out = _send_with_deadline("dep1", dep_deadline)
+            if timed_out:
+                return jsonify({
+                    "success": False,
+                    "message": "重置流程耗時超過 35 秒，請手動檢查",
+                    "steps": steps,
+                })
+            dep_low = (dep_resp or "").lower()
+            dep_ok = "power on" in dep_low or "power" in dep_low
+            steps.append({"step": "dep1", "ok": dep_ok, "response": dep_resp})
+
+            if time.time() > deadline:
+                return jsonify({
+                    "success": False,
+                    "message": "重置流程耗時超過 35 秒，請手動檢查",
+                    "steps": steps,
+                })
+
+            # 4. homing：等待 "Homed" 或 "ack"，最多 30 秒（但限制於整體 deadline）
+            home_deadline = min(time.time() + 30, deadline)
+            home_resp, timed_out = _send_with_deadline("homing", home_deadline)
+            if timed_out:
+                return jsonify({
+                    "success": False,
+                    "message": "重置流程耗時超過 35 秒，請手動檢查",
+                    "steps": steps,
+                })
+            home_low = (home_resp or "").lower()
+            home_ok = "homed" in home_low or "ack" in home_low
+            steps.append({"step": "homing", "ok": home_ok, "response": home_resp})
+
+            overall_ok = dep_ok and home_ok
+            return jsonify({
+                "success": overall_ok,
+                "message": "機器重置完成" if overall_ok else "重置流程已執行，但部分步驟未取得預期回應",
+                "steps": steps,
+            })
+
+    except Exception as e:
+        logger.error(f"machine/reset error: {e}")
+        return jsonify({"success": False, "message": str(e), "steps": steps})
+
+
+@admin_api_bp.route('/machine/force_homing', methods=['POST'])
+def machine_force_homing():
+    """直接執行 homing，給機器一個明確的「回原點」指令。
+
+    與 machine/reset 的差別：不會關 / 開序列埠，只送 homing 指令。
+    """
+    logger.info("admin recovery triggered: machine/force_homing")
+    start_ts = time.time()
+    deadline = start_ts + _RECOVERY_OVERALL_TIMEOUT_SEC
+
+    try:
+        if shared.machine is None:
+            return jsonify({"success": False, "message": "機器控制器尚未初始化"})
+
+        # _send_command 已內含 lock，不必再外層加鎖（lock 是 RLock，重入也安全，
+        # 但這裡保持單純）
+        resp = shared.machine._send_command("homing")
+        if time.time() > deadline:
+            return jsonify({
+                "success": False,
+                "message": "Homing 流程耗時超過 35 秒，請手動檢查",
+                "response": resp,
+            })
+        low = (resp or "").lower()
+        ok = "homed" in low or "ack" in low
+        return jsonify({
+            "success": ok,
+            "message": "Homing 完成" if ok else f"Homing 回應未確認: {resp}",
+            "response": resp,
+        })
+
+    except Exception as e:
+        logger.error(f"machine/force_homing error: {e}")
+        return jsonify({"success": False, "message": str(e)})
+
+
+@admin_api_bp.route('/sip2/reconnect', methods=['POST'])
+def sip2_reconnect():
+    """強制重新初始化 SIP2 連線。
+
+    使用 shared.sip2._io_lock（plain Lock，不能重入）防止在 in-flight 還書中
+    斷線；若拿不到 lock 也只是讓 init 繼續執行，不阻擋。
+    """
+    logger.info("admin recovery triggered: sip2/reconnect")
+    start_ts = time.time()
+    deadline = start_ts + _RECOVERY_OVERALL_TIMEOUT_SEC
+
+    try:
+        io_lock = None
+        try:
+            io_lock = getattr(shared.sip2, '_io_lock', None) if shared.sip2 is not None else None
+        except Exception:
+            io_lock = None
+
+        held = False
+        if io_lock is not None:
+            try:
+                held = io_lock.acquire(timeout=5)
+            except Exception:
+                held = False
+
+        try:
+            shared.init_sip2_client()
+        finally:
+            if held and io_lock is not None:
+                try:
+                    io_lock.release()
+                except Exception:
+                    pass
+
+        if time.time() > deadline:
+            return jsonify({
+                "success": False,
+                "message": "SIP2 重連耗時超過 35 秒，請手動檢查",
+            })
+
+        # 等待背景 poller 拿到新的 client 狀態
+        time.sleep(1.5)
+
+        if time.time() > deadline:
+            return jsonify({
+                "success": False,
+                "message": "SIP2 重連耗時超過 35 秒，請手動檢查",
+            })
+
+        library_ok = False
+        try:
+            cached = shared.get_cached_status() or {}
+            library_ok = bool(cached.get('library_ok', False))
+        except Exception:
+            library_ok = False
+
+        return jsonify({
+            "success": True,
+            "message": "SIP2 已重新連線" + ("，library_ok=True" if library_ok else "，但 library_ok 仍為 False，請確認 SIP2 Server 狀態"),
+            "library_ok": library_ok,
+        })
+
+    except Exception as e:
+        logger.error(f"sip2/reconnect error: {e}")
+        return jsonify({"success": False, "message": str(e)})
+
+
+@admin_api_bp.route('/machine/clear_error', methods=['POST'])
+def machine_clear_error():
+    """清除「error state 0」這類卡死狀態：先送 cancel，再送 homing。
+
+    若機器卡在執行中的動作，cancel 會讓它放棄；接著 homing 讓它回到 ready。
+    """
+    logger.info("admin recovery triggered: machine/clear_error")
+    start_ts = time.time()
+    deadline = start_ts + _RECOVERY_OVERALL_TIMEOUT_SEC
+
+    try:
+        if shared.machine is None:
+            return jsonify({"success": False, "message": "機器控制器尚未初始化"})
+
+        cancel_resp = shared.machine._send_command("cancel")
+        if time.time() > deadline:
+            return jsonify({
+                "success": False,
+                "message": "Clear error 耗時超過 35 秒，請手動檢查",
+                "responses": {"cancel": cancel_resp, "homing": None},
+            })
+
+        homing_resp = shared.machine._send_command("homing")
+        if time.time() > deadline:
+            return jsonify({
+                "success": False,
+                "message": "Clear error 耗時超過 35 秒，請手動檢查",
+                "responses": {"cancel": cancel_resp, "homing": homing_resp},
+            })
+
+        low = (homing_resp or "").lower()
+        ok = "homed" in low or "ack" in low
+        return jsonify({
+            "success": ok,
+            "message": "錯誤狀態已清除" if ok else "已送出 cancel + homing，但 homing 回應未確認",
+            "responses": {"cancel": cancel_resp, "homing": homing_resp},
+        })
+
+    except Exception as e:
+        logger.error(f"machine/clear_error error: {e}")
+        return jsonify({"success": False, "message": str(e)})

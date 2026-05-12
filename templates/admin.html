@@ -688,6 +688,35 @@
                         <input type="text" id="custom-cmd" class="form-input" placeholder="{{ t('admin.machine.custom_placeholder', '輸入自訂指令 (例如: opbm1)') }}">
                         <button class="btn btn-primary" onclick="sendCustom()">{{ t('admin.machine.send_cmd', '發送指令') }}</button>
                     </div>
+
+                    <!-- 緊急恢復 (Emergency Recovery) -->
+                    <div style="margin-top: 28px; padding-top: 20px; border-top: 1px solid var(--border-color);">
+                        <h3 style="margin-bottom: 8px; color: var(--danger-color, #d9534f);">
+                            <i class="fas fa-life-ring"></i> {{ t('admin.recovery.title', '緊急恢復') }}
+                        </h3>
+                        <small style="display:block; color:var(--text-secondary); margin-bottom:14px;">
+                            {{ t('admin.recovery.hint', '當機器卡在錯誤狀態或 SIP2 連線異常時，可由此手動觸發修復；每個動作都會跳出確認視窗。') }}
+                        </small>
+                        <div id="recovery-status" style="display:none; padding:10px 14px; margin-bottom:12px; border-radius:6px; font-size:14px;"></div>
+                        <div class="control-grid" style="grid-template-columns: repeat(4, 1fr);">
+                            <button id="recovery-btn-reset" class="control-btn" onclick="triggerRecovery('reset')">
+                                <i class="fas fa-redo-alt" style="color: var(--danger-color, #d9534f);"></i>
+                                {{ t('admin.recovery.reset', '完整重置機器') }}
+                            </button>
+                            <button id="recovery-btn-homing" class="control-btn" onclick="triggerRecovery('force_homing')">
+                                <i class="fas fa-home"></i>
+                                {{ t('admin.recovery.force_homing', '強制回原點') }}
+                            </button>
+                            <button id="recovery-btn-clear" class="control-btn" onclick="triggerRecovery('clear_error')">
+                                <i class="fas fa-broom"></i>
+                                {{ t('admin.recovery.clear_error', '清除錯誤狀態') }}
+                            </button>
+                            <button id="recovery-btn-sip2" class="control-btn" onclick="triggerRecovery('sip2')">
+                                <i class="fas fa-network-wired"></i>
+                                {{ t('admin.recovery.sip2_reconnect', '重連 SIP2') }}
+                            </button>
+                        </div>
+                    </div>
                 </div>
 
                 <div class="card">
@@ -1508,6 +1537,102 @@
             if(cmd) {
                 sendMachineCommand(cmd);
                 document.getElementById('custom-cmd').value = '';
+            }
+        }
+
+        // 緊急恢復按鈕 -> 對應 /api/admin 的四個端點
+        const RECOVERY_ACTIONS = {
+            reset: {
+                url: '/api/admin/machine/reset',
+                btnId: 'recovery-btn-reset',
+                confirm: '確定要重置機器嗎？此動作會關閉並重新開啟序列埠，並送出 dep1 + homing。',
+                label: '完整重置機器',
+            },
+            force_homing: {
+                url: '/api/admin/machine/force_homing',
+                btnId: 'recovery-btn-homing',
+                confirm: '確定要強制執行 homing 嗎？機器會立即嘗試回到原點。',
+                label: '強制回原點',
+            },
+            clear_error: {
+                url: '/api/admin/machine/clear_error',
+                btnId: 'recovery-btn-clear',
+                confirm: '確定要清除錯誤狀態嗎？此動作會送出 cancel + homing。',
+                label: '清除錯誤狀態',
+            },
+            sip2: {
+                url: '/api/admin/sip2/reconnect',
+                btnId: 'recovery-btn-sip2',
+                confirm: '確定要重新連線 SIP2 圖書館伺服器嗎？正在進行中的還書可能會被影響。',
+                label: '重連 SIP2',
+            },
+        };
+
+        let _recoveryStatusTimer = null;
+
+        function showRecoveryStatus(message, ok) {
+            const el = document.getElementById('recovery-status');
+            if (!el) return;
+            el.textContent = message;
+            el.style.background = ok ? '#e6f4ea' : '#fdecea';
+            el.style.color = ok ? '#1e7e34' : '#a02622';
+            el.style.border = ok ? '1px solid #b7e1c1' : '1px solid #f5c2c0';
+            el.style.display = 'block';
+            if (_recoveryStatusTimer) {
+                clearTimeout(_recoveryStatusTimer);
+            }
+            _recoveryStatusTimer = setTimeout(() => {
+                el.style.display = 'none';
+                _recoveryStatusTimer = null;
+            }, 5000);
+        }
+
+        async function triggerRecovery(actionKey) {
+            const action = RECOVERY_ACTIONS[actionKey];
+            if (!action) return;
+            if (!confirm(action.confirm)) return;
+
+            const btn = document.getElementById(action.btnId);
+            const originalHTML = btn ? btn.innerHTML : '';
+            if (btn) {
+                btn.disabled = true;
+                btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 處理中...';
+            }
+
+            const respEl = document.getElementById('machine-response');
+            if (respEl) {
+                respEl.value += `\n> Recovery: ${action.label}...`;
+                respEl.scrollTop = respEl.scrollHeight;
+            }
+
+            try {
+                const res = await fetch(action.url, { method: 'POST' });
+                if (res.status === 401) {
+                    window.location.href = '/login';
+                    return;
+                }
+                const data = await res.json().catch(() => ({ success: false, message: '回應解析失敗' }));
+                const msg = data.message || (data.success ? '完成' : '失敗');
+                showRecoveryStatus(`${action.label}: ${msg}`, !!data.success);
+
+                if (respEl) {
+                    const time = new Date().toLocaleTimeString();
+                    const tag = data.success ? 'RECOVERY OK' : 'RECOVERY FAIL';
+                    respEl.value += `\n[${time}] ${tag} (${action.label}): ${msg}`;
+                    respEl.scrollTop = respEl.scrollHeight;
+                }
+            } catch (e) {
+                console.error(e);
+                showRecoveryStatus(`${action.label}: 請求發生錯誤 ${e}`, false);
+                if (respEl) {
+                    respEl.value += `\nRECOVERY EXCEPTION: ${e}`;
+                    respEl.scrollTop = respEl.scrollHeight;
+                }
+            } finally {
+                if (btn) {
+                    btn.disabled = false;
+                    btn.innerHTML = originalHTML;
+                }
             }
         }
 
