@@ -23,3 +23,6 @@ machine:
   port: /dev/uno
 max_return_limit: 20
 require_admin_login: true
+watchdog:
+  auto_recover_machine: true
+  auto_recover_sip2: true
