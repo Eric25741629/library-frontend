@@ -913,12 +913,27 @@
             await cancelReturn(btn);
         }
 
-        // 取消還書：使用新的 cancel API，不需要執行 home
+        // 等待機器真正回到 homed（cancel 韌體只送 ack，後續還要 ~27 秒物理移動到 homed）
+        // 透過 SSE 推送 / polling fallback 更新的 window.__latestStatus 來判斷。
+        // 期間 overlay 維持「投書口關閉、機器歸位中」，不讓使用者按下一個還書，
+        // 避免 ensureAwake 看到「尚未 homed」又重發 homing（即「重置機器」感）。
+        // 60 秒沒等到就放棄等待、讓使用者進首頁；若機器真的卡住，由 watchdog 處理。
+        async function waitUntilHomed(timeoutMs = 60000, pollMs = 500) {
+            const deadline = Date.now() + timeoutMs;
+            while (Date.now() < deadline) {
+                const s = window.__latestStatus;
+                if (s && s.is_homed && !s.homing_in_progress) return true;
+                await new Promise(r => setTimeout(r, pollMs));
+            }
+            return false;
+        }
+
+        // 取消還書：發送 cancel 指令後，等機器物理歸位完成才解鎖回首頁
         async function cancelReturn(btn) {
             if (btn) btn.disabled = true;
-            showLoading('正在取消還書...');
+            showLoading('投書口關閉中，機器歸位中…請稍候');
             try {
-                // 使用新的 cancel API
+                // 1. 發送 cancel
                 try {
                     const cancelRes = await fetch('/api/cancel', { method: 'POST' });
                     const cancelJson = await cancelRes.json().catch(() => null);
@@ -930,18 +945,28 @@
                     console.warn('cancel API failed', e);
                     alert('取消指令發送失敗，請聯絡管理員確認機器狀態。');
                 }
-    
-                // 立即重置前端狀態
+
+                // 2. 清掉自動倒數與已掃描列表（這不會送任何指令給後端，所以可以早做）
                 clearTimeout(autoRedirectTimer);
                 clearInterval(countdownInterval);
                 scannedBooks = [];
                 currentProcessingBook = null;
                 currentAttachmentBarcode = null;
                 updateBookList();
+
+                // 3. 等機器真正 homed，再回首頁。SSE 通常在 1s 內就會推 is_homed=true。
+                const homed = await waitUntilHomed(60000, 500);
+                if (!homed) {
+                    console.warn('cancelReturn: homed wait timed out');
+                    // 不阻擋使用者，但提示一下。下次互動時 ensureAwake / watchdog 會處理。
+                    alert('機器歸位時間較長，若再次嘗試還書仍異常，請洽櫃台。');
+                }
+
                 nextStep('step-welcome');
             } catch (e) {
                 console.error('cancelReturn error', e);
                 alert('取消還書時發生錯誤');
+                nextStep('step-welcome');
             } finally {
                 hideLoading();
                 if (btn) setTimeout(() => { try { btn.disabled = false } catch(e){} }, 500);
@@ -1246,42 +1271,87 @@
              }
         }
 
-        // 定期檢查系統狀態（包含圖書館與機器通訊）
+        // 最新的系統狀態快照，供其它流程（cancel、ensureAwake 等）就近查詢，
+        // 避免再去打一次 /api/status。由 SSE / polling 任一條路更新。
+        window.__latestStatus = null;
+
+        // 套用一份狀態到 UI（共用入口；SSE push 與 polling fallback 都呼叫這個）
+        function applyStatusToUI(data) {
+            window.__latestStatus = data;
+            const overlay = document.getElementById('suspended-overlay');
+            if (overlay) overlay.style.display = data.suspended ? 'flex' : 'none';
+
+            try {
+                const libDot = document.getElementById('lib-dot');
+                const libText = document.getElementById('lib-text');
+                const machDot = document.getElementById('machine-dot');
+                const machText = document.getElementById('machine-text');
+
+                if (data.library_ok) {
+                    libDot.style.backgroundColor = '#2ecc71';
+                    libText.textContent = '可用';
+                } else {
+                    libDot.style.backgroundColor = '#dc3545';
+                    libText.textContent = '連線失敗';
+                }
+
+                if (data.machine_ok) {
+                    machDot.style.backgroundColor = '#2ecc71';
+                    machText.textContent = '就緒';
+                } else {
+                    machDot.style.backgroundColor = '#dc3545';
+                    machText.textContent = '離線';
+                }
+            } catch (e) {
+                console.error('Update status UI failed', e);
+            }
+        }
+
+        // Polling fallback：SSE 斷線時兜底，每 5 秒打一次 /api/status
         function checkSystemStatus() {
             fetch('/api/status')
                 .then(response => response.json())
-                .then(data => {
-                    const overlay = document.getElementById('suspended-overlay');
-                    if (overlay) overlay.style.display = data.suspended ? 'flex' : 'none';
-
-                    // 更新圖書館 / 機器狀態顯示
-                    try {
-                        const libDot = document.getElementById('lib-dot');
-                        const libText = document.getElementById('lib-text');
-                        const machDot = document.getElementById('machine-dot');
-                        const machText = document.getElementById('machine-text');
-
-                        if (data.library_ok) {
-                            libDot.style.backgroundColor = '#2ecc71';
-                            libText.textContent = '可用';
-                        } else {
-                            libDot.style.backgroundColor = '#dc3545';
-                            libText.textContent = '連線失敗';
-                        }
-
-                        if (data.machine_ok) {
-                            machDot.style.backgroundColor = '#2ecc71';
-                            machText.textContent = '就緒';
-                        } else {
-                            machDot.style.backgroundColor = '#dc3545';
-                            machText.textContent = '離線';
-                        }
-                    } catch (e) {
-                        console.error('Update status UI failed', e);
-                    }
-                })
+                .then(applyStatusToUI)
                 .catch(err => console.error('Status check failed', err));
         }
+
+        // SSE 訂閱：後端狀態變化時主動推給前端，平常完全不靠輪詢
+        (function startSse() {
+            let es = null;
+            let reconnectTimer = null;
+
+            function connect() {
+                try {
+                    es = new EventSource('/api/events');
+                } catch (e) {
+                    console.warn('EventSource not supported', e);
+                    return;
+                }
+                es.onmessage = (ev) => {
+                    try {
+                        applyStatusToUI(JSON.parse(ev.data));
+                    } catch (e) {
+                        console.error('SSE parse failed', e);
+                    }
+                };
+                es.onerror = () => {
+                    // 瀏覽器會自動重連（預設 ~3s），但我們也設個保險。
+                    // 期間靠 5s polling 不會中斷狀態顯示。
+                    console.warn('SSE error');
+                    if (!reconnectTimer) {
+                        reconnectTimer = setTimeout(() => {
+                            reconnectTimer = null;
+                            try { es && es.close(); } catch (_) {}
+                            connect();
+                        }, 5000);
+                    }
+                };
+                es.onopen = () => {
+                    console.log('SSE connected');
+                };
+            }
+            connect();
+        })();
 
         // 當有人點擊螢幕時喚醒機器（節流 30 秒）
         (function(){
@@ -1301,8 +1371,10 @@
             document.addEventListener('keypress', tryWake);
         })();
 
-        // 每 15 秒檢查一次
-        setInterval(checkSystemStatus, 15000);
+        // 每 5 秒兜底一次（SSE 正常時這只是補保險；SSE 斷線時靠它撐著）
+        setInterval(checkSystemStatus, 5000);
+        // 啟動時立刻 fetch 一次，避免使用者載入後要等到第一次 SSE / interval 才看到狀態
+        checkSystemStatus();
     </script>
 </body>
 </html>

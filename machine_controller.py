@@ -129,11 +129,13 @@ class MachineController:
 
             #if last_c == "close":
                  # min_interval 為 2，再加上 5 秒，總共等待 7 秒
-                 #required_interval = min_interval 
+                 #required_interval = min_interval
             #else:
             required_interval = min_interval
-     
-            if elapsed < required_interval:
+
+            # state 是純讀取指令，不該被 MIN_COMMAND_INTERVAL 拖累，否則 /api/status
+            # 在連續查詢或剛發完其他指令時會卡到 2 秒才回。其他指令仍維持間隔保護。
+            if cmd != "state" and elapsed < required_interval:
                 wait = required_interval - elapsed
                 self.logger.debug(f"Waiting {wait:.2f}s before sending command: {cmd}")
                 time.sleep(wait)

@@ -1,5 +1,7 @@
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, Response, request, jsonify, stream_with_context
 from datetime import datetime
+import json
+import queue
 import time
 import threading
 import logging
@@ -148,99 +150,67 @@ def _compute_target_bin(location: str, book_id: str = None) -> int:
 
 @api_bp.route('/status')
 def get_status():
-    """檢查系統狀態（包含圖書館與機器通訊）"""
-    suspended = shared.is_box_full()
-    limit = shared.MAX_RETURN_LIMIT
-    bin_counts = shared.get_bin_counts()
+    """檢查系統狀態（包含圖書館與機器通訊）
 
-    # 檢查圖書館通訊
-    # 改用 SIP2 99 SC Status 健康檢查，而不是一直送 17 Item Information
-    library_ok = False
-    try:
-        if shared.sip2:
-            try:
-                library_ok = bool(shared.sip2.health_check())
-            except Exception:
-                library_ok = False
-        else:
-            library_ok = False
-    except Exception as e:
-        logger.error(f"status check library error: {e}")
-        library_ok = False
-
-    # 檢查機器通訊
-    machine_ok = False
-    machine_debug = {"ser_open": False, "type": None}
-    machine_state = "unknown"
-    homing_in_progress = False
-    is_homed = False
-    
-    machine = shared.machine
-
-    try:
-        machine_debug["type"] = type(machine).__name__ if machine is not None else None
-        ser = getattr(machine, 'ser', None)
-        ser_open = bool(ser and getattr(ser, 'is_open', False))
-        machine_ok = ser_open
-        machine_debug["ser_open"] = ser_open
-
-        # 主動更新機器狀態
-        last_resp = ""
-        if machine and hasattr(machine, 'get_status'):
-            try:
-                last_resp = machine.get_status()
-            except Exception as e:
-                logger.debug(f"status probe get_status failed: {e}")
-
-        # 讀取更新後的機器內部狀態標記
-        try:
-            homing_in_progress = bool(getattr(machine, 'homing_in_progress', False))
-            is_homed = bool(getattr(machine, 'is_homed', False))
-            is_sleeping = bool(getattr(machine, 'is_sleeping', False))
-        except Exception:
-            homing_in_progress = False
-            is_homed = False
-            is_sleeping = False
-
-        # 決定可讀狀態優先順序
-        if machine is None:
-            machine_state = "unavailable"
-        elif is_sleeping:
-            machine_state = "sleeping"
-        elif homing_in_progress:
-            machine_state = "homing"
-        elif is_homed:
-            machine_state = "homed"
-        else:
-            machine_state = "ready"
-            try:
-                low = str(last_resp).lower()
-                if "open" in low or "opened" in low:
-                    machine_state = "opened"
-                elif "closed" in low:
-                    machine_state = "closed"
-                elif "power on" in low or "dep1" in low:
-                    machine_state = "power_on_not_homed"
-                elif "homed" in low or "ack" in low:
-                    machine_state = "homed"
-            except Exception:
-                pass
-    except Exception as e:
-        logger.error(f"status check machine error: {e}")
-        machine_ok = False
-        machine_state = "error"
-
+    從 shared._state_cache 讀取，不再每次都打 serial / SIP2。背景 thread
+    （shared._state_poll_thread）每秒更新一次 cache，所以這個 endpoint 永遠
+    在 10 ms 內回應，且不會被還書中的指令拖累。
+    """
+    cached = shared.get_cached_status()
     return jsonify({
-        "suspended": suspended,
-        "limit": limit,
-        "bin_counts": bin_counts,
-        "library_ok": library_ok,
-        "machine_ok": machine_ok,
-        "machine_state": machine_state,
-        "homing_in_progress": homing_in_progress,
-        "is_homed": is_homed,
-        "machine_debug": machine_debug
+        "suspended": cached.get('suspended', False),
+        "limit": cached.get('limit', shared.MAX_RETURN_LIMIT),
+        "bin_counts": cached.get('bin_counts', {}),
+        "library_ok": cached.get('library_ok', False),
+        "machine_ok": cached.get('machine_ok', False),
+        "machine_state": cached.get('machine_state', 'unknown'),
+        "homing_in_progress": cached.get('homing_in_progress', False),
+        "is_homed": cached.get('is_homed', False),
+        "machine_debug": cached.get('machine_debug', {"ser_open": False, "type": None}),
+        "last_updated": cached.get('last_updated', 0.0),
     })
+
+
+@api_bp.route('/events')
+def events():
+    """Server-Sent Events endpoint — 狀態變化時主動推給前端。
+
+    背景 polling thread（shared._state_poll_thread）偵測到 cache 有意義的變化
+    時，會把新快照丟到每個訂閱者的 queue。本 handler 阻塞讀那個 queue 並轉送
+    成 SSE 訊息。15 秒沒事件就送 keepalive 防止反向代理或瀏覽器收掉連線。
+
+    用法：前端 `new EventSource('/api/events')`，監聽 message 事件解析 JSON。
+    """
+    def gen():
+        q = shared.subscribe_state()
+        try:
+            # 連上來就先送一份目前的 cache，前端不需要等到下一次變化
+            initial = shared.get_cached_status()
+            yield f"data: {json.dumps(initial)}\n\n"
+
+            while True:
+                try:
+                    snapshot = q.get(timeout=15)
+                    yield f"data: {json.dumps(snapshot)}\n\n"
+                except queue.Empty:
+                    # SSE keepalive 註解行（以 ':' 開頭），不會觸發 onmessage
+                    yield ": keepalive\n\n"
+        except GeneratorExit:
+            # 連線斷掉時 Flask 會丟這個 exception，正常路徑
+            pass
+        except Exception as e:
+            logger.error(f"SSE generator error: {e}")
+        finally:
+            shared.unsubscribe_state(q)
+
+    headers = {
+        'Cache-Control': 'no-cache, no-transform',
+        'X-Accel-Buffering': 'no',   # 給 nginx：不要 buffer SSE
+        'Connection': 'keep-alive',
+    }
+    return Response(stream_with_context(gen()),
+                    mimetype='text/event-stream',
+                    headers=headers)
 
 
 @api_bp.route('/frontend/fullscreen_lost', methods=['POST'])

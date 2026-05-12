@@ -1094,18 +1094,43 @@
         document.addEventListener('click', resetIdleTimer);
         document.addEventListener('scroll', resetIdleTimer);
 
-        // Auto Refresh
+        // Auto Refresh — 5s 兜底；主要狀態靠 /api/events SSE 即時推送（見下方）
         setInterval(() => {
-            // 只要不是隱藏狀態，就更新狀態（不論在儀表板或機器控制頁面）
-            // fetchLogs 只在儀表板時更新
             if(document.getElementById('view-dashboard').style.display !== 'none') {
                 fetchLogs();
             }
-            
-            // 狀態更新頻率加快，且在各頁面都更新
-            // 注意：fetchStatus 會更新儀表板(stat-card)以及機器控制(machine-control-state)兩處的狀態
             fetchStatus();
-        }, 15000);
+        }, 5000);
+
+        // SSE 訂閱：後端狀態變化時主動推給前端
+        (function startAdminSse() {
+            let es = null;
+            let reconnectTimer = null;
+            function connect() {
+                try {
+                    es = new EventSource('/api/events');
+                } catch (e) {
+                    console.warn('EventSource not supported', e);
+                    return;
+                }
+                es.onmessage = () => {
+                    // SSE 收到任何 push 都觸發一次 fetchStatus（fetchStatus 內部已經會
+                    // 解析 /api/status 的 cache，幾乎 0 成本）。這樣不必複製 fetchStatus
+                    // 裡的 UI 更新邏輯。
+                    try { fetchStatus(); } catch (err) { console.error(err); }
+                };
+                es.onerror = () => {
+                    if (!reconnectTimer) {
+                        reconnectTimer = setTimeout(() => {
+                            reconnectTimer = null;
+                            try { es && es.close(); } catch (_) {}
+                            connect();
+                        }, 5000);
+                    }
+                };
+            }
+            connect();
+        })();
 
         // --- Logic Functions (Same as before, adapted for new UI) ---
 

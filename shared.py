@@ -2,6 +2,7 @@ import logging
 from logging.handlers import TimedRotatingFileHandler
 import json
 import os
+import queue
 from pathlib import Path
 import yaml
 import sys
@@ -331,11 +332,217 @@ def check_machine_idle():
             logger.error(f"Error checking machine idle: {e}")
         time.sleep(60)
 
+
+# ─── 狀態快取（B-2） ────────────────────────────────────────────────────────
+#
+# 原本 /api/status 每次呼叫都打 serial（machine.get_status，~200ms）+ SIP2
+# health_check（~3ms），總共 ~0.3–2.1 秒。前端又每 15 秒輪詢，狀態變化最壞要
+# 17 秒才出現在 UI 上。
+#
+# 改用「背景單一 thread 統一打 serial / SIP2 → 寫進 cache → /api/status 與
+# /api/events SSE 都從 cache 讀」的架構：
+#   - 不管前端有幾個 client 或多頻繁呼叫 /api/status，serial 流量都固定。
+#   - /api/status 回應時間從 0.3–2.1s 變成 <10ms。
+#   - 狀態真的改變時，背景 thread 透過 _state_subscribers 主動推給 SSE，
+#     前端不必輪詢就能即時收到。
+#   - SIP2 每 15 個 tick（15s）才檢查一次，避免拖累 SIP2 server。
+
+_STATE_POLL_INTERVAL_SEC = 1.0
+_SIP2_POLL_EVERY_N_TICKS = 15      # 每 15 秒檢查一次 SIP2 health
+
+_state_cache = {
+    'suspended': False,
+    'limit': 0,
+    'bin_counts': {},
+    'library_ok': False,
+    'machine_ok': False,
+    'machine_state': 'unknown',
+    'homing_in_progress': False,
+    'is_homed': False,
+    'machine_debug': {'ser_open': False, 'type': None},
+    'last_updated': 0.0,
+}
+_state_cache_lock = threading.Lock()
+
+# 訂閱者清單；每個訂閱者是一個 queue.Queue，背景 thread 偵測到狀態變化時 put
+# 一份新狀態進去。SSE handler 從自己的 queue 取出來推給 client。
+_state_subscribers = []
+_state_subscribers_lock = threading.Lock()
+
+# 標示狀態是否真的有改變（用於決定要不要 notify 訂閱者）
+_STATE_CHANGE_FIELDS = (
+    'suspended', 'library_ok', 'machine_ok', 'machine_state',
+    'homing_in_progress', 'is_homed', 'bin_counts',
+)
+
+
+def get_cached_status():
+    """非阻塞取得最新狀態快照（淺拷貝）。"""
+    with _state_cache_lock:
+        return dict(_state_cache)
+
+
+def subscribe_state():
+    """登記一個狀態變化訂閱者，回傳 Queue。SSE handler 從這個 Queue get。
+    呼叫端結束時務必 unsubscribe_state(q) 釋放資源。"""
+    q = queue.Queue(maxsize=16)
+    with _state_subscribers_lock:
+        _state_subscribers.append(q)
+    return q
+
+
+def unsubscribe_state(q):
+    with _state_subscribers_lock:
+        try:
+            _state_subscribers.remove(q)
+        except ValueError:
+            pass
+
+
+def _notify_subscribers(snapshot):
+    with _state_subscribers_lock:
+        targets = list(_state_subscribers)
+    for q in targets:
+        try:
+            # 訂閱者來不及消費就丟新的（避免 SSE 卡死整個 poll thread）
+            if q.full():
+                try:
+                    q.get_nowait()
+                except queue.Empty:
+                    pass
+            q.put_nowait(snapshot)
+        except Exception as e:
+            logger.debug(f"notify subscriber failed: {e}")
+
+
+def _collect_machine_state():
+    """從 machine controller 與本地計算出機器相關欄位。不會打 SIP2。"""
+    out = {
+        'machine_ok': False,
+        'machine_state': 'unavailable',
+        'homing_in_progress': False,
+        'is_homed': False,
+        'machine_debug': {'ser_open': False, 'type': None},
+    }
+    if machine is None:
+        return out
+    try:
+        out['machine_debug']['type'] = type(machine).__name__
+        ser = getattr(machine, 'ser', None)
+        ser_open = bool(ser and getattr(ser, 'is_open', False))
+        out['machine_ok'] = ser_open
+        out['machine_debug']['ser_open'] = ser_open
+
+        # 主動更新機器狀態（這裡會發 'state' 指令到 serial）
+        last_resp = ''
+        if hasattr(machine, 'get_status'):
+            try:
+                last_resp = machine.get_status()
+            except Exception as e:
+                logger.debug(f"poll get_status failed: {e}")
+
+        homing_flag = bool(getattr(machine, 'homing_in_progress', False))
+        is_homed = bool(getattr(machine, 'is_homed', False))
+        is_sleeping = bool(getattr(machine, 'is_sleeping', False))
+        out['homing_in_progress'] = homing_flag
+        out['is_homed'] = is_homed
+
+        # 決定可讀狀態優先順序（跟原本 /api/status 的判斷一致）
+        if is_sleeping:
+            out['machine_state'] = 'sleeping'
+        elif homing_flag:
+            out['machine_state'] = 'homing'
+        elif is_homed:
+            out['machine_state'] = 'homed'
+        else:
+            out['machine_state'] = 'ready'
+            try:
+                low = str(last_resp).lower()
+                if 'open' in low or 'opened' in low:
+                    out['machine_state'] = 'opened'
+                elif 'closed' in low:
+                    out['machine_state'] = 'closed'
+                elif 'power on' in low or 'dep1' in low:
+                    out['machine_state'] = 'power_on_not_homed'
+                elif 'homed' in low or 'ack' in low:
+                    out['machine_state'] = 'homed'
+            except Exception:
+                pass
+    except Exception as e:
+        logger.error(f"_collect_machine_state error: {e}")
+        out['machine_state'] = 'error'
+    return out
+
+
+def _collect_sip2_state():
+    """檢查 SIP2 連線。打一次 99 health_check。"""
+    if not sip2:
+        return {'library_ok': False}
+    try:
+        return {'library_ok': bool(sip2.health_check())}
+    except Exception:
+        return {'library_ok': False}
+
+
+def _state_poll_thread():
+    """背景 thread，每秒打 serial 拿狀態，每 15 秒打 SIP2 拿連線狀態。
+    狀態變化時呼叫 _notify_subscribers 把新快照推給訂閱者。"""
+    tick = 0
+    while True:
+        try:
+            tick += 1
+            machine_part = _collect_machine_state()
+
+            # SIP2 健康檢查節流：tick=1 立即跑一次，之後每 15 tick 一次
+            if tick == 1 or tick % _SIP2_POLL_EVERY_N_TICKS == 0:
+                sip2_part = _collect_sip2_state()
+            else:
+                with _state_cache_lock:
+                    sip2_part = {'library_ok': _state_cache.get('library_ok', False)}
+
+            # 本地計算欄位（檔案 / sqlite，便宜）
+            try:
+                bin_counts = get_bin_counts()
+            except Exception:
+                bin_counts = {}
+            try:
+                suspended = is_box_full()
+            except Exception:
+                suspended = False
+
+            new_snapshot = {
+                **machine_part,
+                **sip2_part,
+                'bin_counts': bin_counts,
+                'suspended': suspended,
+                'limit': MAX_RETURN_LIMIT,
+                'last_updated': time.time(),
+            }
+
+            # 寫入 cache，判斷有沒有「有意義的」變化
+            changed = False
+            with _state_cache_lock:
+                for f in _STATE_CHANGE_FIELDS:
+                    if _state_cache.get(f) != new_snapshot.get(f):
+                        changed = True
+                        break
+                _state_cache.update(new_snapshot)
+                snapshot_copy = dict(_state_cache)
+
+            if changed:
+                _notify_subscribers(snapshot_copy)
+        except Exception as e:
+            logger.error(f"_state_poll_thread error: {e}")
+        time.sleep(_STATE_POLL_INTERVAL_SEC)
+
+
 def start_background_tasks():
     # 1. 初始化機器
     threading.Thread(target=init_machine_async, daemon=True).start()
     # 2. 閒置檢查
     threading.Thread(target=check_machine_idle, daemon=True).start()
+    # 3. 狀態快取 polling（serial / SIP2 每秒同步進 cache，狀態變化推 SSE 訂閱者）
+    threading.Thread(target=_state_poll_thread, daemon=True).start()
 
 # --- 主初始化入口 ---
 def init_shared():
