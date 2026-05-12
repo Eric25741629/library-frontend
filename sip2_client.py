@@ -1,6 +1,7 @@
 import socket
 import datetime
 import logging
+import threading
 
 class SIP2Client:
     def __init__(self, host, port, login_user, login_pass, institution_id='MAIN'):
@@ -11,6 +12,12 @@ class SIP2Client:
         self.institution_id = institution_id
         self.sock = None
         self.logger = logging.getLogger(__name__)
+        # SIP2 server 沒有 request ID，回應靠到達順序對應到請求。Flask 多 thread
+        # 會把還書(09)、查書(17)、健康檢查(99) 同時送上同一條 socket，造成回應
+        # 跑到別人那邊去（10/98 互相錯接），實際發生過 checkin 拿到 98 後誤判
+        # 還書失敗、機器開門讓使用者拿回早就還掉的書。用 lock 序列化所有
+        # send+recv，確保每筆請求拿到自己的回應。
+        self._io_lock = threading.Lock()
 
     def connect(self):
         try:
@@ -29,27 +36,30 @@ class SIP2Client:
             self.sock = None
 
     def _send_message(self, message):
-        if not self.sock:
-            if not self.connect():
+        # 序列化整個 send+recv，避免多 thread（例如 /api/status 健康檢查與
+        # /api/return 同時呼叫）讓 socket 上的回應跑錯對象。
+        with self._io_lock:
+            if not self.sock:
+                if not self.connect():
+                    return None
+
+            # Add CRC (Optional but recommended) - implementation simplified for now
+            # Ideally, we should calculate CRC and append it.
+            # Format: <message><sequence><CRC><CR>
+
+            # Simple send without CRC logic for now, just append CR
+            message += '\r'
+
+            try:
+                self.logger.info(f"SIP2 SEND: {message.replace(chr(13), '<CR>')}")
+                self.sock.sendall(message.encode('utf-8'))
+                response = self.sock.recv(1024).decode('utf-8')
+                self.logger.info(f"SIP2 RECV: {response.replace(chr(13), '<CR>')}")
+                return response
+            except Exception as e:
+                self.logger.error(f"Socket error: {e}")
+                self.close()
                 return None
-        
-        # Add CRC (Optional but recommended) - implementation simplified for now
-        # Ideally, we should calculate CRC and append it. 
-        # Format: <message><sequence><CRC><CR>
-        
-        # Simple send without CRC logic for now, just append CR
-        message += '\r'
-        
-        try:
-            self.logger.info(f"SIP2 SEND: {message.replace(chr(13), '<CR>')}")  
-            self.sock.sendall(message.encode('utf-8'))
-            response = self.sock.recv(1024).decode('utf-8')
-            self.logger.info(f"SIP2 RECV: {response.replace(chr(13), '<CR>')}")  
-            return response
-        except Exception as e:
-            self.logger.error(f"Socket error: {e}")
-            self.close()
-            return None
 
     def login(self):
         """
