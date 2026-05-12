@@ -23,6 +23,22 @@ _SIP2_TRIVIAL_NOTICES = {'還書成功', '還書完成', '歸還成功', '歸還
 _SIP2_OVERDUE_KEYWORDS = ('逾期', '過期', '罰款', '滯納', '超過借閱', '欠款')
 
 
+# 條碼開頭代表 CD 光碟附件的前綴；V / VH / D 各自獨立分類，不混為一談。
+# 比對順序很重要：較長的 VH 必須先比對，否則會被 V 吃掉，導致無法區分 VH 與單純的 V。
+_DISC_MEDIA_PREFIXES = ('VH', 'V', 'D')
+
+
+def _disc_media_kind(book_id):
+    """回傳條碼匹配到的光碟附件前綴（'VH' / 'V' / 'D'）；不是光碟則回傳 None。"""
+    if not book_id:
+        return None
+    s = str(book_id).strip().upper()
+    for prefix in _DISC_MEDIA_PREFIXES:
+        if s.startswith(prefix):
+            return prefix
+    return None
+
+
 def _classify_sip2_notice(text):
     """將 SIP2 AF/AG 文字分類；回傳 (text, 'overdue'|'notice') 或 None（無資訊量）。"""
     if not text:
@@ -294,6 +310,17 @@ def scan_book():
 
     if not book_id:
         return jsonify({"success": False, "message": "請輸入書籍編號"}), 400
+
+    # V / VH / D 開頭的條碼一律視為 CD 光碟附件，本機不收，掃描階段就攔下，
+    # 不必白白送 SIP2 查詢。沿用 ATTACHMENT_NOT_ACCEPTED code 讓前端可以重用既有 UI。
+    disc_kind = _disc_media_kind(book_id)
+    if disc_kind:
+        logger.info(f"Rejecting disc-media barcode at scan time ({disc_kind}-prefix): {book_id}")
+        return jsonify({
+            "success": False,
+            "code": "ATTACHMENT_NOT_ACCEPTED",
+            "message": "本機不接受 CD 光碟還書，請洽櫃檯。"
+        }), 400
 
     # 1. 查詢 SIP2 圖書館系統
     if not shared.sip2:
