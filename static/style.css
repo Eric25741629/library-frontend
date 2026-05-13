@@ -459,7 +459,9 @@ button:active {
     font-size: 0.9rem;
     color: var(--text-light);
     border-top: 1px solid rgba(0,0,0,0.05);
-    z-index: 1000;
+    /* 高於任何全螢幕 overlay，保留管理後台連結為「死局逃生口」：
+       例如 homepage-warning-modal 把掃描區擋住時，管理員仍能從右下角進 /admin */
+    z-index: 10100;
 }
 
 .system-status {

@@ -311,6 +311,25 @@
         </div>
     </div>
 
+    <!-- 首頁機器狀態警示：由 pollHomepageBookCheck 控制 -->
+    <!-- z-index 9998：擋住歡迎/掃描區，但低於 footer (10100) 讓「管理後台」連結始終可點 -->
+    <div id="homepage-warning-modal" class="suspended-overlay" style="display:none; align-items:center; justify-content:center; z-index:9998;">
+        <div class="suspended-content" style="max-width:760px; padding: 2rem; border-radius:12px; text-align:center; background:rgba(255,255,255,0.96); color:var(--text-dark);">
+            <i id="homepage-warning-icon" class="fas fa-exclamation-triangle" style="font-size:5rem; color:var(--danger-red); margin-bottom:1rem;"></i>
+            <h2 id="homepage-warning-title" style="color:var(--danger-red); margin-bottom:0.75rem;">{{ t('homepage_warning.title', '機器狀態異常') }}</h2>
+            <p id="homepage-warning-body" style="font-size:1.2rem; color:#333; margin-bottom:1.5rem; line-height:1.6;">{{ t('homepage_warning.default', '機器目前處於異常狀態，暫停還書服務。請聯絡管理員處理。') }}</p>
+            <p id="homepage-warning-detail" style="font-size:0.9rem; color:#888; margin-bottom:1.5rem;"></p>
+            <div style="display:flex; justify-content:center; gap:12px; flex-wrap:wrap;">
+                <a href="/admin" class="btn-primary btn-medium" style="min-width:200px; text-decoration:none;">
+                    <i class="fas fa-cog"></i> {{ t('homepage_warning.admin', '前往管理後台') }}
+                </a>
+                <button class="btn-secondary btn-medium" onclick="recheckHomepageBookStatus()" style="min-width:160px;">
+                    <i class="fas fa-redo"></i> {{ t('homepage_warning.recheck', '重新檢查') }}
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- 查詢中：改用既有 loading overlay 風格，由 JS 呼叫 showLoading/hideLoading 控制 -->
 
     <!-- Footer -->
@@ -396,6 +415,100 @@
         }
         setInterval(updateTime, 1000);
         updateTime();
+
+        // ─── 首頁機器狀態安全檢查 ───────────────────────────────────────────
+        // 使用者在 step-welcome 閒置時，每 10 秒打一次 /api/homepage/book_check：
+        //   - book_in_chute：投書口偵測到書（前一輪 return 沒結束乾淨）
+        //   - abnormal_state：state ≠ homed/sleeping（門卡開或卡關）
+        // 連續 2 次異常才彈 modal（避免單次 lock 競爭或暫態誤判）。
+        // Modal z-index 9998 擋住主操作區但低於 footer 10100，管理員依然可從
+        // 右下角「管理後台」進 /admin 解除異常。
+        let _homepageCheckTimer = null;
+        let _homepageBadCount = 0;
+        const HOMEPAGE_CHECK_INTERVAL_MS = 10000;
+        const HOMEPAGE_BAD_THRESHOLD = 2;
+
+        async function pollHomepageBookCheck() {
+            try {
+                const r = await fetch('/api/homepage/book_check', { cache: 'no-store' });
+                const j = await r.json().catch(() => null);
+                if (!j) return;
+                if (j.ok === true) {
+                    _homepageBadCount = 0;
+                    hideHomepageWarning();
+                    return;
+                }
+                if (j.ok === false) {
+                    _homepageBadCount += 1;
+                    if (_homepageBadCount >= HOMEPAGE_BAD_THRESHOLD) {
+                        showHomepageWarning(j);
+                    }
+                    return;
+                }
+                // ok === null：lock busy / query_failed / machine_unavailable
+                // 既不增加也不重置，等下次 tick
+            } catch (e) {
+                // 網路錯誤等不該觸發 modal
+            }
+        }
+
+        function showHomepageWarning(result) {
+            const titleEl = document.getElementById('homepage-warning-title');
+            const bodyEl = document.getElementById('homepage-warning-body');
+            const detailEl = document.getElementById('homepage-warning-detail');
+            if (titleEl && bodyEl) {
+                if (result && result.reason === 'book_in_chute') {
+                    titleEl.textContent = '偵測到投書口殘留書籍';
+                    bodyEl.textContent = '上次還書流程未正常結束，投書口內仍有書本。請聯絡管理員取出並重置機器。';
+                } else if (result && result.reason === 'abnormal_state') {
+                    titleEl.textContent = '機器狀態異常';
+                    bodyEl.textContent = '機器目前無法進入還書流程，請聯絡管理員。';
+                } else {
+                    titleEl.textContent = '機器狀態異常';
+                    bodyEl.textContent = '暫停還書服務，請聯絡管理員處理。';
+                }
+            }
+            if (detailEl) {
+                const parts = [];
+                if (result && result.machine_state) parts.push('狀態：' + result.machine_state);
+                if (result && result.reason) parts.push('原因：' + result.reason);
+                detailEl.textContent = parts.join('  /  ');
+            }
+            const modal = document.getElementById('homepage-warning-modal');
+            if (modal) modal.style.display = 'flex';
+        }
+
+        function hideHomepageWarning() {
+            const modal = document.getElementById('homepage-warning-modal');
+            if (modal) modal.style.display = 'none';
+        }
+
+        async function recheckHomepageBookStatus() {
+            _homepageBadCount = 0;
+            await pollHomepageBookCheck();
+        }
+
+        function startHomepagePolling() {
+            if (_homepageCheckTimer) return;
+            pollHomepageBookCheck();
+            _homepageCheckTimer = setInterval(pollHomepageBookCheck, HOMEPAGE_CHECK_INTERVAL_MS);
+        }
+
+        function stopHomepagePolling() {
+            if (_homepageCheckTimer) {
+                clearInterval(_homepageCheckTimer);
+                _homepageCheckTimer = null;
+            }
+            _homepageBadCount = 0;
+            hideHomepageWarning();
+        }
+
+        // 預設 step-welcome 已是 active，啟動 polling
+        document.addEventListener('DOMContentLoaded', () => {
+            if (document.getElementById('step-welcome')?.classList.contains('active')) {
+                startHomepagePolling();
+            }
+        });
 
         // 顯示臨時訊息彈窗（例如條碼錯誤），自動在 seconds 秒後隱藏
         function showTempMessage(message, seconds = 3) {
@@ -598,7 +711,7 @@
             // Show target section
             const target = document.getElementById(stepId);
             target.classList.add('active');
-    
+
             // Special logic for scan step
             if (stepId === 'step-scan') {
                 const input = document.getElementById('barcode-input');
@@ -611,6 +724,13 @@
                     input.value = '';
                     // setTimeout(() => input.focus(), 100); // 移除 focus 以避免觸發虛擬鍵盤
                 }
+            }
+
+            // 首頁安全檢查 polling：只在 step-welcome 時跑
+            if (stepId === 'step-welcome') {
+                startHomepagePolling();
+            } else {
+                stopHomepagePolling();
             }
         }
 
