@@ -264,7 +264,7 @@ def init_machine_controller():
     global machine
     machine_cfg = cfg.get('machine', {})
     port = machine_cfg.get('port', '/dev/uno')
-    baudrate = machine_cfg.get('baudrate', 38400)
+    baudrate = machine_cfg.get('baudrate', 19200)
     
     # 優先讀取 machine_config.json
     try:
@@ -463,24 +463,44 @@ def _collect_machine_state():
         out['homing_in_progress'] = homing_flag
         out['is_homed'] = is_homed
 
-        # 決定可讀狀態優先順序（跟原本 /api/status 的判斷一致）
-        if is_sleeping:
-            out['machine_state'] = 'sleeping'
-        elif homing_flag:
+        # 決定可讀狀態：規格 state 0-5 是單一事實來源，優先用 state digit 推；
+        # 用旗標當 fallback（例如 state 查詢期間正在 homing）。
+        # 舊版用 is_homed 旗標時把 state 2/3/4 都壓成 'homed'，UI 看不出投書口開關。
+        state_name_by_code = {
+            0: 'not_init',
+            1: 'power_on_not_homed',
+            2: 'homed',
+            3: 'opened',
+            4: 'closed',
+            5: 'sleeping',
+        }
+        s_raw = str(last_resp).strip() if last_resp is not None else ''
+        # 'busy' = _send_command 拿不到 lock；別把它變成 _raw_state_resp 餵給 watchdog，
+        # 也別讓下面 fallback 把 machine_state 倒退到 'ready'。沿用上次 cache 的值。
+        if s_raw == 'busy':
+            out['_raw_state_resp'] = 'busy'
+            with _state_cache_lock:
+                out['machine_state'] = _state_cache.get('machine_state', 'ready')
+            return out
+        if homing_flag:
             out['machine_state'] = 'homing'
+        elif s_raw.isdigit() and int(s_raw) in state_name_by_code:
+            out['machine_state'] = state_name_by_code[int(s_raw)]
+        elif is_sleeping:
+            out['machine_state'] = 'sleeping'
         elif is_homed:
             out['machine_state'] = 'homed'
         else:
             out['machine_state'] = 'ready'
             try:
-                low = str(last_resp).lower()
-                if 'open' in low or 'opened' in low:
+                low = s_raw.lower()
+                if 'opened' in low:
                     out['machine_state'] = 'opened'
                 elif 'closed' in low:
                     out['machine_state'] = 'closed'
-                elif 'power on' in low or 'dep1' in low:
-                    out['machine_state'] = 'power_on_not_homed'
-                elif 'homed' in low or 'ack' in low:
+                elif 'power on' in low:
+                    out['machine_state'] = 'homed' if 'not homed' not in low else 'power_on_not_homed'
+                elif 'homed' in low and 'not homed' not in low:
                     out['machine_state'] = 'homed'
             except Exception:
                 pass
@@ -541,8 +561,8 @@ def _update_machine_empty_counter(raw_resp):
 
     例外：'busy' 是 _send_command 對 state 指令拿不到 lock 時的回傳值
     （代表正有別的動作 open/close/cancel/put 持鎖，硬體不一定卡），
-    這次 tick 不該計入也不該重置；否則 ~12 秒的長動作期間會累計多筆
-    empty，動作一結束 watchdog 就會送 dep1+homing 把成果回滾。"""
+    這次 tick 不該計入也不該重置；否則 12 秒 open 期間會累計 ~12 個 empty，
+    動作一結束 watchdog 就會送 dep1+homing 把成果回滾。"""
     global _consecutive_empty_state
     if isinstance(raw_resp, str) and raw_resp.strip() == 'busy':
         return

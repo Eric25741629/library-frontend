@@ -49,13 +49,16 @@ class _FakeMachine:
     STATE_OPENED = 3
 
     def __init__(self, default_state='3', command_responses=None,
-                 book_present=True):
+                 book_present=True, close_door_result=True, sort_book_result=True):
         self.default_state = default_state
         self.command_responses = command_responses or {}
         self.book_present = book_present
+        self._close_door_result = close_door_result
+        self._sort_book_result = sort_book_result
         # 紀錄 reopen_door 是否被呼叫，方便個別測試斷言「失敗後是否重開門」
         self.reopen_door_called = False
         self.close_door_called = False
+        self.sort_book_called_with = None
 
     def get_status(self):
         return self.default_state
@@ -70,7 +73,7 @@ class _FakeMachine:
 
     def close_door(self):
         self.close_door_called = True
-        return 'closed'
+        return self._close_door_result
 
     def reopen_door(self):
         self.reopen_door_called = True
@@ -80,7 +83,8 @@ class _FakeMachine:
         return self.book_present
 
     def sort_book(self, bin_number=1):
-        return f'put{bin_number} ack'
+        self.sort_book_called_with = bin_number
+        return self._sort_book_result
 
 
 class _FakeSIP2:
@@ -243,20 +247,20 @@ class TestMachineErrorState0:
         assert machine.close_door_called is False
         assert machine.reopen_door_called is False
 
-    def test_homing_fallback_error_state_0_also_blocks(self, client):
-        # 機器 state 既不是 OPENED 也不是 error state 0 → 走 fallback homing
-        # homing 回 'error state 0' 時應該擋下
-        machine = _FakeMachine(
-            default_state='2',  # HOMED，不是 OPENED → 走 fallback homing 分支
-            command_responses={'homing': 'error state 0'},
-        )
-        sip2 = _FakeSIP2({'success': True})
+    def test_non_opened_state_rejected_strictly(self, client):
+        # 新行為（規格 2025-12-07 流程）：state 非 3 (OPENED) 直接拒絕，
+        # 不再走「盲送 homing fallback 後繼續 close」這條會吞書本的路徑。
+        # 取代舊版 test_homing_fallback_error_state_0_also_blocks。
+        machine = _FakeMachine(default_state='2')  # HOMED 但門沒開
+        sip2 = _FakeSIP2({'success': True})  # 不該被用到
         with _patched_env(machine=machine, sip2=sip2):
             rv = _post_return(client)
-        assert rv.status_code == 503
+        assert rv.status_code == 409
         body = rv.get_json()
-        assert body['code'] == 'MACHINE_ERROR_STATE_0'
+        assert body['code'] == 'MACHINE_NOT_OPEN'
+        # 嚴格拒絕：不該關門、不該呼叫 SIP2 checkin
         assert machine.close_door_called is False
+        assert machine.reopen_door_called is False
 
     def test_case_insensitive_match(self, client):
         # 真實機器有時用大寫 'Error State 0' 之類；判斷必須不分大小寫
@@ -265,6 +269,55 @@ class TestMachineErrorState0:
         with _patched_env(machine=machine, sip2=sip2):
             rv = _post_return(client)
         assert rv.get_json()['code'] == 'MACHINE_ERROR_STATE_0'
+
+
+class TestCloseDoorFailure:
+    """close_door() 回 False 時不能繼續往下 checkin / sort，
+    必須回 MACHINE_CLOSE_FAILED 並重開門讓使用者取回書本。"""
+
+    def test_close_failed_blocks_checkin_and_reopens(self, client):
+        machine = _FakeMachine(default_state='3', close_door_result=False)
+        sip2 = _FakeSIP2({'success': True})  # 不該被用到
+        with _patched_env(machine=machine, sip2=sip2):
+            rv = _post_return(client)
+        assert rv.status_code == 500
+        body = rv.get_json()
+        assert body['code'] == 'MACHINE_CLOSE_FAILED'
+        # close 失敗 → 應該重開門讓使用者取書、且 sort_book 不該被呼叫
+        assert machine.close_door_called is True
+        assert machine.reopen_door_called is True
+        assert machine.sort_book_called_with is None
+
+
+class TestSortBookFailure:
+    """sort_book() 回 False 時，SIP2 已 commit、box_inventory 已寫入，
+    流程仍回 success=True 但 response 帶 sort_warning 給前端 / 管理員追查。"""
+
+    def test_sort_failure_returns_success_with_warning(self, client):
+        machine = _FakeMachine(default_state='3', sort_book_result=False)
+        sip2 = _FakeSIP2({'success': True})
+        with _patched_env(machine=machine, sip2=sip2):
+            rv = _post_return(client)
+        assert rv.status_code == 200
+        body = rv.get_json()
+        # 還書本身仍標 success（SIP2 已 commit 無法 reverse）
+        assert body['success'] is True
+        # 但帶上 sort_warning 警告碼
+        assert body.get('sort_warning') is not None
+        assert body['sort_warning']['code'] == 'SORT_FAILED'
+        assert '櫃台' in body['sort_warning']['message']
+        # sort_book 確實被呼叫過
+        assert machine.sort_book_called_with is not None
+
+    def test_sort_success_has_no_warning(self, client):
+        machine = _FakeMachine(default_state='3', sort_book_result=True)
+        sip2 = _FakeSIP2({'success': True})
+        with _patched_env(machine=machine, sip2=sip2):
+            rv = _post_return(client)
+        assert rv.status_code == 200
+        body = rv.get_json()
+        assert body['success'] is True
+        assert body.get('sort_warning') is None
 
 
 class TestSip2Disconnected:

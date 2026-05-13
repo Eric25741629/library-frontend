@@ -3,6 +3,7 @@ import logging
 import shared
 import time
 import threading
+from machine_controller import is_completion, is_busy_response, is_error_state_response
 
 hardware_api_bp = Blueprint('hardware_api', __name__)
 logger = logging.getLogger('hardware_api')
@@ -16,23 +17,16 @@ def open_hardware_door():
 
 @hardware_api_bp.route('/close', methods=['POST'])
 def close_hardware_door():
-    """單獨關閉投書口 API"""
+    """單獨關閉投書口 API（透過 cancel 中止還書流程）"""
     try:
-        # 使用 cancel 指令替代直接 close，因為在故障/還書流程中 cancel 更安全
         resp = shared.machine._send_command('cancel')
-        ok = False
-        try:
-            s = str(resp).lower()
-            if 'ack' in s or 'cancel' in s or 'canceled' in s or 'cancelled' in s:
-                ok = True
-        except Exception:
-            pass
-
-        if ok:
-            return jsonify({"success": True, "message": "已發送 cancel 指令 (視為關門/中止)", "response": resp})
-        else:
-            # 若沒有明確 ack，也回傳成功但附上原始回應以供除錯
-            return jsonify({"success": True, "message": "已發送 cancel 指令 (無明確 ACK)", "response": resp})
+        if is_completion("cancel", resp):
+            return jsonify({"success": True, "message": "已取消還書並回到 ready", "response": resp})
+        if is_busy_response(resp):
+            return jsonify({"success": False, "message": "機器忙碌中，請稍後再試", "response": resp}), 409
+        if is_error_state_response(resp):
+            return jsonify({"success": False, "message": f"取消失敗：{resp}", "response": resp}), 400
+        return jsonify({"success": False, "message": "取消指令未確認完成", "response": resp}), 500
     except Exception as e:
         logger.error(f"close_hardware_door error: {e}")
         return jsonify({"success": False, "message": "關閉失敗", "detail": str(e)}), 500
@@ -52,51 +46,42 @@ def wake_hardware():
 
 @hardware_api_bp.route('/wake_and_home', methods=['POST'])
 def wake_and_home():
-    """初始化/回原點操作：僅在必要時或使用者手動要求時執行 homing。"""
+    """初始化/回原點：若機器已在 state 2 則跳過 homing。"""
     machine = shared.machine
     try:
-        # 0. 預檢：若機器已在原點 (State 2)，則不需重複執行 Homing
         try:
             status_resp = machine.get_status()
             s = str(status_resp).strip()
-            # 檢查是否為狀態 2 (HOMED)
             if s.isdigit() and int(s) == getattr(machine, 'STATE_HOMED', 2):
-                 logger.info("wake_and_home: Machine is already HOMED (state 2). Skipping hardware action.")
-                 # 確保內部狀態同步
-                 machine.is_homed = True
-                 machine.homing_in_progress = False
-                 machine.is_sleeping = False
-                 return jsonify({"success": True, "message": "機器已在原點 (Skipped)", "response": status_resp})
+                logger.info("wake_and_home: already HOMED, skipping")
+                machine.is_homed = True
+                machine.homing_in_progress = False
+                machine.is_sleeping = False
+                return jsonify({"success": True, "message": "機器已在原點 (Skipped)", "response": status_resp})
         except Exception as e:
             logger.warning(f"wake_and_home pre-check failed: {e}")
 
-        # 1. 確保喚醒
         if hasattr(machine, 'wake_up'):
             machine.wake_up()
         else:
             machine._send_command("dep1")
 
-        # 2. 發送 homing 指令 (手動初始化)
         try:
             resp = machine._send_command("homing")
         except Exception as e:
             logger.warning(f"wake_and_home: homing command failed: {e}")
             return jsonify({"success": False, "message": "homing 指令發送失敗", "detail": str(e)}), 500
 
-        ok = False
-        try:
-            ok = ("homed" in str(resp).lower()) or ("ack" in str(resp).lower())
-        except Exception:
-            ok = False
-        
+        ok = is_completion("homing", resp)
         if hasattr(machine, 'is_homed'):
             machine.is_homed = ok
 
         if ok:
             return jsonify({"success": True, "message": "已執行回原點 (初始化)", "response": resp})
-        else:
-            logger.warning(f"wake_and_home: homing response inconclusive, resp={resp}")
-            return jsonify({"success": True, "message": "回原點指令已發送", "response": resp})
+        if is_busy_response(resp):
+            return jsonify({"success": False, "message": "機器忙碌中，homing 未執行", "response": resp}), 409
+        logger.warning(f"wake_and_home: homing response inconclusive, resp={resp}")
+        return jsonify({"success": False, "message": "回原點未完成", "response": resp}), 500
 
     except Exception as e:
         logger.error(f"wake_and_home error: {e}")
@@ -105,7 +90,7 @@ def wake_and_home():
 
 @hardware_api_bp.route('/reset', methods=['POST'])
 def reset_hardware():
-    """重置序列：用於書本卡住時的快速重置（reopen -> close -> homing）。"""
+    """重置序列：cancel → (若失敗) reopen → close → homing。"""
     machine = shared.machine
     logger.info("reset_hardware: Reset sequence triggered")
     responses = {}
@@ -114,29 +99,22 @@ def reset_hardware():
     try:
         if lock:
             acquired = lock.acquire(timeout=5)
-        # 標記為 action 中，避免其他指令干擾
         try:
             machine.action_in_progress = True
             machine.current_action_code = 99
         except Exception:
             pass
 
-        # 0) 嘗試 cancel（如果是還書流程造成的卡住，先送 cancel 可能比強制 close 更安全）
+        # 0) cancel：若成功直接返回
         cancel_ok = False
         try:
             r = machine._send_command('cancel')
             responses['cancel'] = r
-            try:
-                s = str(r).lower()
-                if any(k in s for k in ('ack', 'cancel', 'cancelled', 'canceled')):
-                    cancel_ok = True
-                    responses['cancel_ok'] = True
-            except Exception:
-                pass
+            cancel_ok = is_completion("cancel", r)
+            responses['cancel_ok'] = cancel_ok
         except Exception as e:
             responses['cancel_error'] = str(e)
 
-        # 如果 cancel 成功（回傳 ack 或取消字樣），則視為已中止還書流程，不需再做機械重置
         if cancel_ok:
             try:
                 machine.action_in_progress = False
@@ -145,46 +123,46 @@ def reset_hardware():
                 pass
             return jsonify({"success": True, "message": "Cancel succeeded; mechanical reset skipped", "responses": responses})
 
-        # 1) 嘗試 reopen（若門已卡，可嘗試重新開啟）
+        # 1) reopen
         try:
             r = machine._send_command('reopen')
             responses['reopen'] = r
+            responses['reopen_ok'] = is_completion("reopen", r)
         except Exception as e:
             responses['reopen_error'] = str(e)
         time.sleep(0.5)
 
-        # 2) 嘗試 close
+        # 2) close
         try:
             r = machine._send_command('close')
             responses['close'] = r
+            responses['close_ok'] = is_completion("close", r)
         except Exception as e:
             responses['close_error'] = str(e)
         time.sleep(0.5)
 
-        # 3) 執行 homing
+        # 3) homing
+        homing_ok = False
         try:
             r = machine._send_command('homing')
             responses['homing'] = r
-            # 解析 homing 成功與否
-            ok = False
-            try:
-                s = str(r).lower()
-                if 'homed' in s or 'ack' in s:
-                    ok = True
-            except Exception:
-                ok = False
-            machine.is_homed = ok
+            homing_ok = is_completion("homing", r)
+            responses['homing_ok'] = homing_ok
+            machine.is_homed = homing_ok
         except Exception as e:
             responses['homing_error'] = str(e)
 
-        # 清除 action flag
         try:
             machine.action_in_progress = False
             machine.current_action_code = None
         except Exception:
             pass
 
-        return jsonify({"success": True, "message": "Reset sequence executed", "responses": responses})
+        return jsonify({
+            "success": bool(homing_ok),
+            "message": "Reset sequence executed" if homing_ok else "Reset 完成但 homing 未確認",
+            "responses": responses,
+        })
     except Exception as e:
         logger.error(f"reset_hardware error: {e}")
         try:

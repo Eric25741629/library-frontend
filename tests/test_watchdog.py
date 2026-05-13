@@ -126,9 +126,9 @@ class TestCounters:
         assert shared._consecutive_empty_state == 0
 
     def test_busy_response_neither_increments_nor_resets(self):
-        # 'busy' = _send_command 在 state 指令拿不到 lock 時的回傳值。
-        # 不該當卡死 (會在長動作結束瞬間誤觸發 recovery 把成果回滾)，
-        # 也不該當「正常回應」清掉真正卡住的累計。
+        # 'busy' = _send_command 在 state 指令拿不到 lock 時的回傳值；
+        # watchdog 不該把它當卡死（會在長動作結束瞬間誤觸發 recovery），
+        # 也不該把它當「正常回應」清掉真正卡住的累計。
         shared._update_machine_empty_counter("")
         shared._update_machine_empty_counter("")
         assert shared._consecutive_empty_state == 2

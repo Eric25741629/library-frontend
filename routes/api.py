@@ -11,9 +11,43 @@ import subprocess
 
 import shared
 import config
+from machine_controller import is_completion, is_busy_response, is_error_state_response
 
 api_bp = Blueprint('api', __name__)
 logger = logging.getLogger('api')
+
+
+# ─── 還書進度追蹤（記憶體 stage tracker）─────────────────────────────────────
+# 給前端 polling 用，取代固定秒數的階段切換。
+# stage 對應：
+#   pre_check    → 關門前確認狀態 / 預檢
+#   closing      → close 指令執行中（投書口關閉）
+#   closed       → close 完成，準備檢查書籍
+#   checkin      → 連線圖書館系統還書
+#   sorting      → put1 / put2 執行中（重新上磁 + 移箱）
+#   done         → 全部完成
+#   error        → 失敗（前端應停止輪詢並顯示錯誤）
+_return_progress_lock = threading.Lock()
+_return_progress = {
+    "stage": "idle",
+    "detail": "",
+    "ts": 0.0,
+    "target_bin": None,
+}
+
+
+def _set_return_stage(stage, detail="", target_bin=None):
+    with _return_progress_lock:
+        _return_progress["stage"] = stage
+        _return_progress["detail"] = detail
+        _return_progress["ts"] = time.time()
+        if target_bin is not None:
+            _return_progress["target_bin"] = target_bin
+    logger.info(f"[return-stage] {stage}: {detail}")
+
+
+def _reset_return_stage():
+    _set_return_stage("idle", "")
 
 
 # SIP2 09/10 checkin 成功時，AF/AG 欄位實務上常是「還書成功」這種無資訊量的回音，
@@ -439,10 +473,27 @@ def check_due():
         "disabled": True
     }), 503
 
+@api_bp.route('/return_progress', methods=['GET'])
+def get_return_progress():
+    """提供前端輪詢還書流程目前 stage。
+
+    回傳：
+      { stage, detail, ts, target_bin, age_sec }
+
+    stage 列表見 _return_progress 註解。
+    """
+    with _return_progress_lock:
+        snap = dict(_return_progress)
+    snap["age_sec"] = round(time.time() - snap["ts"], 2) if snap["ts"] else None
+    return jsonify(snap)
+
+
 @api_bp.route('/return', methods=['POST'])
 def return_book():
     """確認還書 API"""
+    _set_return_stage("pre_check", "檢查還書箱狀態")
     if shared.is_box_full():
+        _set_return_stage("error", "還書箱已滿")
         return jsonify({"success": False, "message": "還書箱已滿，暫停服務", "code": "SERVICE_SUSPENDED"}), 503
 
     data = request.json or {}
@@ -455,14 +506,18 @@ def return_book():
         book_ids = [data['book_id']]
     
     if not book_ids:
+        _set_return_stage("error", "未選擇任何書籍")
         return jsonify({"success": False, "message": "未選擇任何書籍"}), 400
 
     if attachment_only:
         if len(book_ids) != 1:
+            _set_return_stage("error", "附件歸還僅支援單本")
             return jsonify({"success": False, "message": "附件歸還僅支援單本處理"}), 400
         if not attachment_barcode:
+            _set_return_stage("error", "缺少附件條碼")
             return jsonify({"success": False, "message": "缺少附件條碼 (attachment_barcode)"}), 400
         if attachment_barcode.strip().upper() != book_ids[0].strip().upper():
+            _set_return_stage("error", "附件條碼與書籍不符")
             return jsonify({"success": False, "message": "附件條碼與書籍不符，請重新掃描"}), 400
 
     returned_books = []
@@ -489,6 +544,7 @@ def return_book():
     if selected_bin is not None:
         bin_counts = shared.get_bin_counts()
         if bin_counts.get(str(selected_bin), 0) >= shared.MAX_RETURN_LIMIT:
+            _set_return_stage("error", f"分類箱 {selected_bin} 已滿")
             return jsonify({
                 "success": False,
                 "message": f"分類箱{selected_bin}已滿，暫停服務",
@@ -496,55 +552,62 @@ def return_book():
                 "data": {"target_bin": selected_bin}
             }), 503
     
-    # 硬體還書流程控制
+    # 硬體還書流程控制：進入 /api/return 前，前端應該已經呼叫過
+    # wake_and_home + hardware/open，所以 state 必為 3 (OPENED)。
+    # 若不是 state 3，過去的設計會「盲送 homing」想當 fallback，但 homing 後
+    # state=2，接著 close 會回 error state 2 並失敗；流程仍然繼續到 checkin，
+    # 結果是「SIP2 已歸還、box_inventory 已寫入，但書本根本沒進機器」的資料錯位。
+    # 改成嚴格拒絕：state≠3 直接 MACHINE_NOT_OPEN，提示前端重新開門。
     try:
         status = machine.get_status()
-        is_state_3 = False
-
         s_status = str(status).strip()
-        # 機器若回報 "error state 0"，代表上一輪 cancel/reopen 流程卡住了，現在指令會被拒。
-        # 此時不可繼續還書（會把書吞掉但 checkin 卻沒做），改回傳 MACHINE_ERROR_STATE_0
-        # 讓櫃台人員介入。
+
         if _is_machine_error_state_0(s_status):
             logger.error(f"Machine reported error state 0 on pre-close status check: {status}")
+            _set_return_stage("error", "機器錯誤狀態，請洽櫃台")
             return jsonify({
                 "success": False,
                 "code": "MACHINE_ERROR_STATE_0",
                 "message": "機器發生錯誤，請洽櫃台處理。"
             }), 503
 
+        is_state_3 = False
         if s_status.isdigit() and int(s_status) == getattr(machine, 'STATE_OPENED', 3):
             is_state_3 = True
         elif "opened" in s_status.lower() or "error state 3" in s_status.lower():
             is_state_3 = True
 
-        if is_state_3:
-            logger.info(f"Machine is in state {status} (OPENED). Proceeding to close directly.")
-        else:
-            logger.warning(f"Machine state is '{status}' (Not OPENED). Triggering HOMING as safety fallback.")
-            resp = machine._send_command("homing")
-            logger.info(f"Fallback homing response: {resp}")
-            # 即便走到 homing fallback，也要檢查 homing 回應是否帶有 error state 0
-            if _is_machine_error_state_0(resp):
-                logger.error(f"Machine reported error state 0 during fallback homing: {resp}")
-                return jsonify({
-                    "success": False,
-                    "code": "MACHINE_ERROR_STATE_0",
-                    "message": "機器發生錯誤，請洽櫃台處理。"
-                }), 503
+        if not is_state_3:
+            logger.error(
+                f"/api/return rejected: machine state '{status}' is not OPENED (3). "
+                f"Frontend must call /api/hardware/open before /api/return."
+            )
+            _set_return_stage("error", "投書口未開啟，請重新開始還書流程")
+            return jsonify({
+                "success": False,
+                "code": "MACHINE_NOT_OPEN",
+                "message": "投書口未開啟，請重新開始還書流程。",
+                "machine_state": s_status,
+            }), 409
+
+        logger.info(f"Machine is in state {status} (OPENED). Proceeding to close.")
 
     except Exception as e:
-        logger.error(f"Pre-close status check failed: {e}. Defaulting to HOMING.")
-        try:
-             machine._send_command("homing")
-        except:
-             pass
+        logger.error(f"Pre-close status check failed: {e}")
+        _set_return_stage("error", "無法讀取機器狀態")
+        return jsonify({
+            "success": False,
+            "code": "MACHINE_STATUS_UNKNOWN",
+            "message": "無法讀取機器狀態，請洽櫃台。",
+            "detail": str(e),
+        }), 503
 
     # 關門前預檢
     if shared.BOOK_CHECK_ENABLED:
         logger.info("Pre-check: checking book status before closing door...")
         if not machine.check_book_status():
             logger.info("Pre-check failed: Book not detected. Aborting close.")
+            _set_return_stage("error", "未偵測到書籍")
             return jsonify({
                 "success": False,
                 "message": "未偵測到書籍，請確認書籍已放入並靠右對齊",
@@ -554,13 +617,36 @@ def return_book():
         logger.info("Book check disabled by config. Skipping pre-check.")
 
     # 關閉投書口
-    machine.close_door()
+    _set_return_stage("closing", "投書口關閉中")
+    close_ok = machine.close_door()
+    if not close_ok:
+        # close 失敗（hardware glitch、error state）→ 此時尚未做 SIP2 checkin，
+        # 也未寫入 box_inventory，可以安全地讓使用者取書並回首頁。
+        logger.error("close_door failed; reopening to let user retrieve book")
+        _set_return_stage("error", "投書口關閉失敗，請取回書本")
+
+        def async_reopen_after_close_fail():
+            try:
+                time.sleep(0.1)
+                machine.reopen_door()
+            except Exception as e:
+                logger.error(f"Async reopen after close failure failed: {e}")
+
+        threading.Thread(target=async_reopen_after_close_fail, daemon=True).start()
+
+        return jsonify({
+            "success": False,
+            "code": "MACHINE_CLOSE_FAILED",
+            "message": "投書口關閉失敗，已重新開啟，請取回書本並洽櫃台。",
+        }), 500
+    _set_return_stage("closed", "投書口已關閉，檢查書籍是否放妥")
     time.sleep(2)
 
     # 關門後複檢
     if shared.BOOK_CHECK_ENABLED:
         if not machine.check_book_status():
             logger.info("Post-check failed: Book not detected in return box, triggering async reopen.")
+            _set_return_stage("error", "關門後未偵測到書籍，重新開門")
             
             def async_reopen():
                 try:
@@ -616,6 +702,11 @@ def return_book():
         failure_code = "CHECKIN_FAILED"
         failure_message = "圖書館系統拒絕本次還書，請取回書本並洽詢櫃台。"
 
+        # sort_book 警告：SIP2 已 commit 後若 put1/put2 失敗，無法 reverse SIP2，
+        # 仍回 success 但帶 warning 給前端 / 管理員追查。先初始化為 None。
+        sort_warning = None
+
+        _set_return_stage("checkin", "連線圖書館系統還書")
         for b_id in book_ids:
             checkin_success = True
             if not attachment_only:
@@ -741,6 +832,7 @@ def return_book():
         # 3) 回傳錯誤訊息與分類 code，提醒使用者洽詢櫃台
         if not all_checkin_success:
             conn.rollback()
+            _set_return_stage("error", failure_message)
             try:
                 logger.info(f"Checkin failed for books {failed_books} (code={failure_code}); reopening door to let user retrieve items.")
 
@@ -769,6 +861,7 @@ def return_book():
             # 若本次沒有任何成功的還書紀錄，則不啟動分類動作，避免書未成功入帳就被送入箱內
             if not returned_books:
                 logger.warning("No books were successfully checked in; skipping sort_book.")
+                _set_return_stage("error", "沒有成功完成還書的書籍")
                 return jsonify({
                     "success": False,
                     "message": "沒有成功完成還書的書籍，請確認狀態或洽詢櫃台。",
@@ -781,16 +874,40 @@ def return_book():
                 last_book_id = last_book.get('book_id')
                 last_loc = last_book.get('location')
                 selected_bin = _compute_target_bin(last_loc, last_book_id)
-            machine.sort_book(int(selected_bin or 1))
+            bin_to_use = int(selected_bin or 1)
+            _set_return_stage("sorting", f"重新上磁並送入分類箱 {bin_to_use}", target_bin=bin_to_use)
+            sort_ok = machine.sort_book(bin_to_use)
+            if not sort_ok:
+                # sort 失敗時 SIP2 checkin 已經 commit，無法 reverse。
+                # 書本物理上停在 state 4 (投書口關閉、書在裡面、未進分類箱)，
+                # 此時 box_inventory 已寫入（DB 還是承認書在還書箱）但 target_bin
+                # 不一定正確。讓流程繼續回傳 success，並在 response 帶上警告碼，
+                # 由前端顯示「請洽櫃台」訊息，並由後台 log 給管理員追查。
+                logger.error(
+                    f"sort_book failed for bin {bin_to_use}; SIP2 already committed. "
+                    f"Books={[b.get('book_id') for b in returned_books]}. "
+                    f"Manual intervention required."
+                )
+                sort_warning = {
+                    "code": "SORT_FAILED",
+                    "message": f"書籍已歸還，但機器分類動作未確認，請洽櫃台確認分類箱 {bin_to_use}。",
+                }
         except Exception as e:
-            logger.error(f"sort_book failed: {e}")
-        
+            logger.error(f"sort_book raised exception: {e}", exc_info=True)
+            sort_warning = {
+                "code": "SORT_FAILED",
+                "message": "書籍已歸還，但機器分類動作發生例外，請洽櫃台。",
+            }
+
     except Exception as e:
         conn.rollback()
         logger.error(f"Return error: {e}")
+        _set_return_stage("error", f"系統錯誤：{e}")
         return jsonify({"success": False, "message": "系統錯誤"}), 500
     finally:
         conn.close()
+
+    _set_return_stage("done", f"完成歸還 {len(returned_books)} 本")
 
     # 選出最後一筆訊息給前端顯示；optimistic 優先選 overdue 類，再退回一般 notice。
     selected_notice = None
@@ -805,7 +922,9 @@ def return_book():
         # 若有 AF/AG 提示訊息，傳回前端顯示（不影響還書成功與否）
         # overdue_message 為了向後相容保留；notice_type ∈ {'overdue','notice'}
         "overdue_message": selected_notice[0] if selected_notice else None,
-        "notice_type": selected_notice[1] if selected_notice else None
+        "notice_type": selected_notice[1] if selected_notice else None,
+        # sort_warning：SIP2 已歸還但機器分類失敗時帶警告碼，前端可彈窗提示「請洽櫃台」。
+        "sort_warning": sort_warning,
     })
 
 @api_bp.route('/cancel', methods=['POST'])
@@ -819,22 +938,30 @@ def cancel_return():
         # 發送取消指令
         resp = machine._send_command("cancel")
         logger.info(f"Cancel command sent, response: {resp}")
-        
-        # 檢查回應是否包含 ack
-        success = "ack" in str(resp).lower()
-        
-        if success:
+
+        if is_completion("cancel", resp):
             return jsonify({
-                "success": True, 
-                "message": "已發送取消指令",
+                "success": True,
+                "message": "已取消還書",
                 "response": str(resp)
             })
-        else:
+        if is_busy_response(resp):
             return jsonify({
-                "success": True, 
-                "message": "取消指令已發送",
+                "success": False,
+                "message": "機器忙碌中，取消未執行",
                 "response": str(resp)
-            })
+            }), 409
+        if is_error_state_response(resp):
+            return jsonify({
+                "success": False,
+                "message": f"取消失敗：{resp}",
+                "response": str(resp)
+            }), 400
+        return jsonify({
+            "success": False,
+            "message": "取消指令未確認完成",
+            "response": str(resp)
+        }), 500
             
     except Exception as e:
         logger.error(f"Cancel return error: {e}")

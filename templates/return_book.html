@@ -526,6 +526,34 @@
                         'error'
                     );
                     return true;
+                case 'MACHINE_NOT_OPEN':
+                    // state≠3：投書口未開（流程錯位）。後端不會自動修復，
+                    // 讓使用者回歡迎頁重新開始，下一輪會走 wake_and_home + open。
+                    showOverdueMessage(
+                        msg || '投書口未開啟，請重新開始還書流程。',
+                        8,
+                        back,
+                        'notice'
+                    );
+                    return true;
+                case 'MACHINE_CLOSE_FAILED':
+                    // 投書口關閉失敗：後端已重新開門，使用者取回書本後回首頁
+                    showOverdueMessage(
+                        msg || '投書口關閉失敗，已重新開啟，請取回書本並洽櫃台。',
+                        10,
+                        back,
+                        'error'
+                    );
+                    return true;
+                case 'MACHINE_STATUS_UNKNOWN':
+                    // 機器狀態讀不到：sticky，櫃台介入
+                    showOverdueMessage(
+                        msg || '無法讀取機器狀態，請洽櫃台。',
+                        0,
+                        null,
+                        'error'
+                    );
+                    return true;
                 case 'SIP2_DISCONNECTED':
                     // 圖書館連線異常：後端已重開門，10 秒禮貌 modal 後回歡迎頁
                     showOverdueMessage(
@@ -616,39 +644,74 @@
             if (overlay) overlay.style.display = 'none';
         }
 
-        // ── 還書流程階段標示 ──────────────────────────────────────────────────
-        // /api/return 端到端要 25-30 秒（關門 12s + sleep 2s + checkin 1-2s +
-        // 分類 5-10s）。原本整段都顯示「關門中」，使用者會以為當機。改成依時間
-        // 自動切換階段標題，讓使用者大致知道現在做到哪了。誤差 2-3 秒不會造成
-        // 困惑（分箱距離本來就會讓總時間浮動）。
-        let _returnStageTimers = [];
+        // ── 還書流程階段標示（事件驅動，依後端實際進度更新） ─────────────────
+        // 後端 /api/return 在每個關鍵階段會更新 _return_progress，前端每 400ms
+        // 輪詢 /api/return_progress 取得 stage 字串並切換對應標題。
+        //
+        // Stage 對應：
+        //   pre_check  → 確認狀態
+        //   closing    → 投書口關閉中
+        //   closed     → 投書口已關閉，檢查書籍
+        //   checkin    → 連線圖書館系統
+        //   sorting    → 重新上磁並送入分類箱
+        //   done       → 完成（會被 hideLoading 蓋掉）
+        //   error      → 失敗（停止輪詢）
+        let _returnProgressTimer = null;
+        const _stageDisplay = {
+            pre_check: { title: '正在準備', msg: '請稍候' },
+            closing:   { title: '投書口關閉中', msg: '請勿打開投書口' },
+            closed:    { title: '檢查書籍是否放妥', msg: '請稍候' },
+            checkin:   { title: '連線圖書館系統', msg: '正在送出還書資料' },
+            sorting:   { title: '重新上磁並送入分類箱', msg: '即將完成歸還' },
+            done:      { title: '歸還完成', msg: '' },
+            error:     { title: '處理中', msg: '請稍候' },
+        };
 
         function stopReturnStageRotator() {
-            if (_returnStageTimers && _returnStageTimers.length) {
-                _returnStageTimers.forEach(t => clearTimeout(t));
+            if (_returnProgressTimer) {
+                clearInterval(_returnProgressTimer);
+                _returnProgressTimer = null;
             }
-            _returnStageTimers = [];
+        }
+
+        function _applyStageDisplay(stage, detail, targetBin) {
+            const title = document.getElementById('loading-title');
+            const msg = document.getElementById('loading-message');
+            const entry = _stageDisplay[stage];
+            if (!entry) return;
+            let titleText = entry.title;
+            if (stage === 'sorting' && targetBin) {
+                titleText = `重新上磁並送入分類箱 ${targetBin}`;
+            }
+            if (title) title.textContent = titleText;
+            if (msg)   msg.textContent   = entry.msg || (detail || '');
         }
 
         function startReturnStageRotator() {
             stopReturnStageRotator();
-            // 第 1 段：關門 + 偵測（0-14s）
             const overlay = document.getElementById('loading-overlay');
-            const title = document.getElementById('loading-title');
-            const msg = document.getElementById('loading-message');
-            if (title) title.textContent = '投書口關閉中';
-            if (msg) msg.textContent = '請勿打開投書口';
             if (overlay) overlay.style.display = 'flex';
-            // 第 2 段：館方系統 + 上磁（14-17s）
-            _returnStageTimers.push(setTimeout(() => {
-                if (title) title.textContent = '機器正在重新上磁';
-                if (msg) msg.textContent = '即將完成歸還';
-            }, 14000));
-            // 第 3 段：分類入箱（17s 起，直到 hideLoading）
-            _returnStageTimers.push(setTimeout(() => {
-                if (title) title.textContent = '書籍歸位分類中';
-                if (msg) msg.textContent = '請稍候';
-            }, 17000));
+            // 初始顯示
+            _applyStageDisplay('closing', '');
+
+            let lastStage = '';
+            _returnProgressTimer = setInterval(async () => {
+                try {
+                    const r = await fetch('/api/return_progress', { cache: 'no-store' });
+                    if (!r.ok) return;
+                    const j = await r.json();
+                    if (!j || !j.stage) return;
+                    if (j.stage === lastStage) return;
+                    lastStage = j.stage;
+                    if (j.stage === 'idle' || j.stage === 'done') {
+                        // hideLoading 會由 /api/return 的 await 結束時呼叫
+                        return;
+                    }
+                    _applyStageDisplay(j.stage, j.detail, j.target_bin);
+                } catch (e) {
+                    // 網路抖動忽略，繼續輪詢
+                }
+            }, 400);
         }
 
         // 兼容 wrapper：若 partials 中有實作，亦可覆寫 window.__rb_showLoading
@@ -1014,8 +1077,9 @@
             await cancelReturn(btn);
         }
 
-        // 等待機器真正回到 homed（cancel 韌體只送 ack，後續還要 ~27 秒物理移動到 homed）
-        // 透過 SSE 推送 / polling fallback 更新的 window.__latestStatus 來判斷。
+        // 等待機器真正回到 homed。/api/cancel 在送 cancel 後會等到 "canceled" 完成
+        // 訊息才回（實測 2026-05-13 /dev/uno: ack→canceled 約 12 秒），所以 API 返回時
+        // 機器應該已經到 state 2；但仍保留輪詢 fallback 以防 SSE 推送有延遲。
         // 期間 overlay 維持「投書口關閉、機器歸位中」，不讓使用者按下一個還書，
         // 避免 ensureAwake 看到「尚未 homed」又重發 homing（即「重置機器」感）。
         // 60 秒沒等到就放棄等待、讓使用者進首頁；若機器真的卡住，由 watchdog 處理。
@@ -1103,7 +1167,14 @@
                 if (result.success) {
                     hideLoading();
                     const overdueMsg = result.overdue_message;
-                    if (overdueMsg) {
+                    const sortWarn = result.sort_warning;
+                    // 三層提示優先順序：sort_warning (機器分類失敗，需櫃台) > overdue > 純成功
+                    if (sortWarn && sortWarn.message) {
+                        showOverdueMessage(sortWarn.message, 0, () => {
+                            nextStep('step-success');
+                            startAutoRedirect();
+                        }, 'error');
+                    } else if (overdueMsg) {
                         // 若館方回傳 AF/AG 提示訊息，先顯示提示 10 秒（或使用者點擊關閉），再進入成功畫面
                         showOverdueMessage(overdueMsg, 10, () => {
                             nextStep('step-success');
@@ -1241,6 +1312,7 @@
                 hideLoading();
 
                 const overdueMsg = result.overdue_message;
+                const sortWarn = result.sort_warning;
                 const proceedToAttachmentScan = () => {
                     // 重置附件條碼暫存
                     currentAttachmentBarcode = null;
@@ -1248,7 +1320,10 @@
                     nextStep('step-scan-attachment');
                 };
 
-                if (overdueMsg) {
+                // sort_warning 優先（機器分類失敗，需櫃台處理）
+                if (sortWarn && sortWarn.message) {
+                    showOverdueMessage(sortWarn.message, 0, proceedToAttachmentScan, 'error');
+                } else if (overdueMsg) {
                     showOverdueMessage(overdueMsg, 10, proceedToAttachmentScan, result.notice_type);
                 } else {
                     proceedToAttachmentScan();
@@ -1368,6 +1443,7 @@
                     hideLoading();
 
                     const overdueMsg = result.overdue_message;
+                    const sortWarn = result.sort_warning;
                     const finishSuccessFlow = () => {
                         // 清除暫存
                         currentAttachmentBarcode = null;
@@ -1376,7 +1452,9 @@
                         startAutoRedirect();
                     };
 
-                    if (overdueMsg) {
+                    if (sortWarn && sortWarn.message) {
+                        showOverdueMessage(sortWarn.message, 0, finishSuccessFlow, 'error');
+                    } else if (overdueMsg) {
                         showOverdueMessage(overdueMsg, 10, finishSuccessFlow, result.notice_type);
                     } else {
                         finishSuccessFlow();

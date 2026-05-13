@@ -6,55 +6,128 @@ from pathlib import Path
 
 import serial
 
-# 可配置的機器設定檔（儲存 UART 設定）
 MACHINE_CONFIG_FILE = Path('machine_config.json')
 
+
+# 規格 2025-12-07：純查詢類指令（立即回單行結果，不會有後續完成訊息）
+QUERY_COMMANDS = {
+    "state", "act", "act2", "bookok",
+    "opbm1", "opbm2", "opbm3", "opbm4",
+    "opwd1", "opwd2", "opbhdn", "opbhup",
+    "readskip", "help",
+}
+
+# 動作類指令：先回 ack（或 ack-busy / error state），動作完成後再回完成訊息
+ACTION_COMPLETION_PATTERNS = {
+    "dep1": ["device power on"],          # device power on / device power on, not homed
+    "dep0": ["device power of"],          # device power of (規格拼字)
+    "homing": ["homed"],                  # Homed
+    "open": ["opened"],
+    "reopen": ["opened"],
+    "close": ["closed"],
+    "put1": ["been put1"],
+    "put2": ["been put2"],
+    # cancel 兩階段已實測（2026-05-13 /dev/uno）：state 3 下送 cancel →
+    # 0.22s ack → 12.16s canceled → state 2。timeout 必須足夠覆蓋實測 ~12s。
+    "cancel": ["canceled", "cancelled"],
+    "reset": ["reseted"],
+    "bmto1": ["moved to pos1"],
+    "bmto2": ["moved to pos2"],
+    "bmto3": ["moved to pos3"],
+    "bmto4": ["moved to pos4"],
+    "skip": ["skip book check"],
+    "resume": ["resume book check"],
+}
+
+# 每個動作指令容許完成訊息的最大等待秒數
+ACTION_TIMEOUTS = {
+    "dep1": 8, "dep0": 8,
+    "homing": 40,
+    "open": 20, "close": 20, "reopen": 20,
+    "put1": 120, "put2": 120,
+    # cancel：實測 state 3 下 ack→canceled 約 12s（2026-05-13 /dev/uno），給 2x headroom
+    "cancel": 30, "reset": 40,
+    "bmto1": 30, "bmto2": 30, "bmto3": 30, "bmto4": 30,
+    "skip": 3, "resume": 3,
+}
+
+# Phase 1: 等 ack / ack-busy / error state 的最長時間
+PHASE1_ACK_TIMEOUT = 2.0
+
+
+def is_busy_response(resp):
+    """回應是否表示機構忙碌中（指令未執行）。"""
+    if resp is None:
+        return False
+    s = str(resp).strip().lower()
+    return s == "ack-busy" or s.startswith("ack-busy")
+
+
+def is_error_state_response(resp):
+    """回應是否為 'error state X'（指令在錯誤狀態下被拒絕）。"""
+    if resp is None:
+        return False
+    return str(resp).strip().lower().startswith("error state")
+
+
+def is_completion(cmd, resp):
+    """檢查 resp 是否為 cmd 對應的完成訊息。
+
+    這是給上層 caller 用的標準判斷，**不要再用 `"ack" in resp` 的字串比對**。
+    """
+    if resp is None:
+        return False
+    s = str(resp).strip().lower()
+    if not s or s == "ack" or is_busy_response(s) or is_error_state_response(s):
+        return False
+    patterns = ACTION_COMPLETION_PATTERNS.get(cmd, [])
+    for p in patterns:
+        if p.lower() in s:
+            return True
+    return False
+
+
 class MachineController:
-    def __init__(self, port='/dev/uno', baudrate=38400, simulate=False):
+    # 暴露為 class 屬性，方便外部 import
+    QUERY_COMMANDS = QUERY_COMMANDS
+    ACTION_COMPLETION_PATTERNS = ACTION_COMPLETION_PATTERNS
+    ACTION_TIMEOUTS = ACTION_TIMEOUTS
+
+    def __init__(self, port='/dev/uno', baudrate=19200, simulate=False):
         """
-        simulate: 若為 True，則不開啟序列埠，而在 _send_command 中回傳模擬回應，
-        方便遠端或 CI 在沒有實體設備時測試放書/檢查書籍流程。
+        simulate: 若為 True，則不開啟序列埠，方便遠端或 CI 在沒有實體設備時測試。
+
+        baudrate 預設 19200，與規格 2025-12-07 一致。
         """
         self.port = port
         self.baudrate = baudrate
         self.ser = None
         self.simulate = bool(simulate)
-        # Use dedicated 'machine' logger so machine logs go to machine.log
         self.logger = logging.getLogger('machine')
-        # Threading lock to protect serial access across threads/requests
-        # 使用 RLock 允許同一執行緒（例如在 recovery 中）重入
+        # RLock 允許同一執行緒重入
         self.lock = threading.RLock()
 
-        # 狀態常數
+        # 狀態常數（規格 §3）
         self.STATE_NOT_INIT = 0
         self.STATE_POWER_ON_NOT_HOMED = 1
         self.STATE_HOMED = 2
         self.STATE_OPENED = 3
-        self.STATE_CLOSED = 4 # 等待確認書籍
-        self.STATE_SLEEPING = 5 # 待機中 (新增)
-        
-        # 閒置休眠設定
+        self.STATE_CLOSED = 4
+        self.STATE_SLEEPING = 5
+
         self.last_action_time = time.time()
-        self.last_cmd = None # 記錄上一個執行的指令
-        self.MIN_COMMAND_INTERVAL = 2  # 最少兩秒才可發送下一個控制指令
-        # Initialize last_serial_time to allow immediate first command
+        self.last_cmd = None
+        self.MIN_COMMAND_INTERVAL = 2
         self.last_serial_time = time.time() - self.MIN_COMMAND_INTERVAL
-        self.IDLE_TIMEOUT = 15 * 60 # 15 minutes
-        self.is_sleeping = True # 假設初始為休眠，init時會喚醒
-        # homing 非同步旗標：喚醒後背景執行 homing 不阻塞呼叫端
+        self.IDLE_TIMEOUT = 15 * 60
+        self.is_sleeping = True
         self.homing_in_progress = False
-        # 機器是否已完成 homing（即為 ready state）
         self.is_homed = False
-        # 機構是否正在執行某個動作（例如 put1/put2/slide 等），此期間不接受控制指令
         self.action_in_progress = False
-        # 當前執行中的動作代碼（若有）
         self.current_action_code = None
-        # 是否已完成初次初始化（區分第一次開機需要強制 homing）
         self.initialized = False
-        # 在非同步喚醒後，最長等待 homing 完成時間（秒）
         self.HOMING_WAIT_TIMEOUT = 30
-        
-        # 暫停狀態查詢的截止時間 (timestamp)
+
         self.pause_query_until = 0
 
         if not self.simulate:
@@ -67,242 +140,132 @@ class MachineController:
                     stopbits=serial.STOPBITS_ONE,
                     timeout=2
                 )
-                self.logger.info(f"Connected to machine on {self.port}")
+                self.logger.info(f"Connected to machine on {self.port} @ {self.baudrate}")
             except Exception as e:
                 self.logger.error(f"Failed to connect to machine: {e}")
         else:
-            # 在模擬模式下，不嘗試開啟序列埠
             self.ser = None
             self.logger.info("MachineController running in simulate mode; serial disabled")
 
-    def _send_command(self, cmd):
-        """發送指令並等待回應 (ACK 或 完成訊息)
+    # ─────────────────────────────────────────────────────────────────
+    # 核心：兩階段協定的 _send_command
+    # ─────────────────────────────────────────────────────────────────
 
-        - 在發送前確保與上一個控制指令的間隔至少為 self.MIN_COMMAND_INTERVAL（秒）。
-        - 在發送與收到回應時寫入日誌（會由根 logger 的 TimedRotatingFileHandler 輸出，逐日輪替，保留 30 天）。
+    def _send_command(self, cmd):
+        """依規格 2025-12-07 的兩階段協定發送指令。
+
+        Phase 1（短 timeout PHASE1_ACK_TIMEOUT）：等待
+          - "ack"          → 進入 Phase 2 等完成
+          - "ack-busy"     → 機構忙碌，回傳 "ack-busy"
+          - "error state X"→ 狀態錯誤，回傳該字串
+          - 完成訊息       → 部分快指令可能跳過 ack，直接給完成訊息
+
+        Phase 2（依指令各自的 ACTION_TIMEOUTS）：等待完成訊息
+          - 完成訊息       → 回傳該字串
+          - "error state X"→ 回傳該字串（例如機構在動作途中改變狀態）
+          - timeout        → 回傳 "ack-no-completion"
+
+        查詢類指令（QUERY_COMMANDS）：只讀單行非空回應後立即回傳。
+
+        若處於 simulate 模式或序列埠未開啟，會回傳描述性錯誤字串。
         """
-        # 若距離上次控制指令不足，先等待剩餘時間
-        # Use lock if available to prevent concurrent serial access
         lock = getattr(self, 'lock', None)
 
-        # 若機構正在執行動作（action_in_progress），立即回傳 ack-busy
-        # 只允許查詢相關指令通過（例如 state / bookok）以取得當前狀態
-        if getattr(self, 'action_in_progress', False) and cmd not in ["state", "bookok"]:
-            self.logger.info(f"MachineCommand BUSY: {cmd} -> ack-busy (action {getattr(self,'current_action_code',None)})")
+        # 內部 action_in_progress 旗標：仍在執行動作時，僅放行查詢指令
+        if getattr(self, 'action_in_progress', False) and cmd not in QUERY_COMMANDS:
+            self.logger.info(
+                f"MachineCommand BUSY (internal flag): {cmd} -> ack-busy "
+                f"(action={getattr(self,'current_action_code',None)})"
+            )
             return "ack-busy"
-        # 針對 'state' 查詢指令，使用非阻塞或短超時鎖定，避免在執行長時間動作(如 put)時卡死監控執行緒。
+
+        # 鎖：state 使用非阻塞 0.1s timeout 避免拖住監控執行緒。
         # 拿不到鎖代表正有其他動作 (open/close/cancel/…) 持鎖；硬體不一定卡，
         # 只是這次不該打擾。回傳 "busy" 而非空字串，讓 watchdog 的「空回應」
-        # 計數器能區分「機器卡死」與「動作進行中」(見 shared._update_machine_empty_counter)。
+        # 計數器能區分「機器卡死」與「動作進行中」。
         if cmd == "state":
-            if lock:
-                if not lock.acquire(timeout=0.1):
-                    return "busy"
+            if lock and not lock.acquire(timeout=0.1):
+                return "busy"
         else:
-            # 其他控制指令則必須等待鎖
             if lock:
                 lock.acquire()
 
         try:
-            # 計算距離上次指令的時間 (使用 last_serial_time 確保所有指令都遵循間隔)
-            try:
-                last_t = getattr(self, 'last_serial_time', 0)
-                if last_t == 0:
-                     # Fallback if not init
-                     last_t = self.last_action_time
-                elapsed = time.time() - last_t
-            except Exception:
-                elapsed = getattr(self, 'MIN_COMMAND_INTERVAL', 2)
-
-            # 嚴格限制：若處於暫停查詢期間，且當前指令為 state，則直接跳過不傳送
-            # 這是為了避免在 close/put 等動作後立即查詢狀態導致邏輯重疊或干擾
+            # state 查詢若在 pause_query_until 期間直接跳過
             if cmd == "state":
                 pq = getattr(self, 'pause_query_until', 0)
                 if time.time() < pq:
-                    # self.logger.debug(f"Skipping state query (paused until {pq})")
                     return "time error"
 
-            # 決定等待時間：
-            # 若上一個指令是 close，需要額外等待（依需求描述：額外多等待5秒，不能立刻詢問）
-            # 其他情況使用 MIN_COMMAND_INTERVAL (預設 2秒)
-            min_interval = getattr(self, 'MIN_COMMAND_INTERVAL', 2)
-            last_c = getattr(self, 'last_cmd', None)
+            # 指令間隔保護（state 例外，狀態查詢不該被卡）
+            if cmd != "state":
+                try:
+                    elapsed = time.time() - getattr(self, 'last_serial_time', 0)
+                except Exception:
+                    elapsed = self.MIN_COMMAND_INTERVAL
+                if elapsed < self.MIN_COMMAND_INTERVAL:
+                    wait = self.MIN_COMMAND_INTERVAL - elapsed
+                    self.logger.debug(f"Waiting {wait:.2f}s before sending: {cmd}")
+                    time.sleep(wait)
 
-            #if last_c == "close":
-                 # min_interval 為 2，再加上 5 秒，總共等待 7 秒
-                 #required_interval = min_interval
-            #else:
-            required_interval = min_interval
-
-            # state 是純讀取指令，不該被 MIN_COMMAND_INTERVAL 拖累，否則 /api/status
-            # 在連續查詢或剛發完其他指令時會卡到 2 秒才回。其他指令仍維持間隔保護。
-            if cmd != "state" and elapsed < required_interval:
-                wait = required_interval - elapsed
-                self.logger.debug(f"Waiting {wait:.2f}s before sending command: {cmd}")
-                time.sleep(wait)
-     
-            # 更新最後動作時間 (除了查詢狀態指令外 - 影響休眠邏輯)
+            # 控制指令觸發喚醒
             woke = False
-            if cmd not in ["state"] and not cmd.startswith("op"):
+            if cmd not in QUERY_COMMANDS:
                 self.last_action_time = time.time()
                 if self.is_sleeping and cmd != "dep1":
-                    # 呼叫 wake_up（可能啟動非同步 homing）
                     self.wake_up()
                     woke = True
-            
-            # 針對特定指令，設定暫停狀態查詢的時間 (pause state query)
-            # 機器在觸發 close 時，應該觸發詢問機器狀態 15 秒
-            # 機器在觸發 put1 時，應該暫停詢問狀態 30 秒
-            # 注意：這裡使用負向邏輯：設定 last_serial_time 以延遲下一個指令，或者直接 sleep?
-            # 需求解讀：是為了避免狀態查詢指令 (get_status -> state) 在這些動作執行期間干擾或獲取錯誤狀態。
-            # 實作方式：更新 last_serial_time 或使用一個獨立的 pause_query_until 標記
-            
-            # 使用 pause_query_until 機制 (需在 __init__ 加入初始化)
-            
-            # 如果剛喚醒且非同步 homing 還未完成，等待 homing (以避免立即下 open 等動作導致錯誤)
+
+            # 喚醒後，若有非同步 homing 仍在進行，等它完成才送下一個動作
             if woke and cmd != "dep1":
-                wait_deadline = time.time() + getattr(self, 'HOMING_WAIT_TIMEOUT', 30)
-                self.logger.info(f"Waiting for homing to complete before sending '{cmd}' (deadline in {self.HOMING_WAIT_TIMEOUT}s)...")
+                wait_deadline = time.time() + self.HOMING_WAIT_TIMEOUT
+                self.logger.info(
+                    f"Waiting for homing before '{cmd}' (deadline {self.HOMING_WAIT_TIMEOUT}s)"
+                )
                 while time.time() < wait_deadline:
-                    if not getattr(self, 'homing_in_progress', False) and getattr(self, 'is_homed', False):
+                    if not self.homing_in_progress and self.is_homed:
                         break
                     time.sleep(0.1)
                 else:
-                    # timeout
-                    self.logger.warning(f"Homing did not finish within {self.HOMING_WAIT_TIMEOUT}s; proceeding may fail.")
+                    self.logger.warning(
+                        f"Homing did not finish within {self.HOMING_WAIT_TIMEOUT}s"
+                    )
                     return "Error: Homing timeout"
-      
-            # 記錄要發送的指令
+
             self.logger.info(f"MachineCommand SEND: {cmd}")
-     
-            if not self.ser or not self.ser.is_open:
+
+            if not self.ser or not getattr(self.ser, 'is_open', False):
                 self.logger.error(f"MachineCommand ERROR: Serial not open for cmd={cmd}")
                 return "Error: Serial not open"
-     
-            full_cmd = f"{cmd}\n" # 加上 0x0A (Line Feed)
+
             try:
-                self.ser.write(full_cmd.encode())
+                self.ser.reset_input_buffer()
+            except Exception:
+                pass
+
+            try:
+                self.ser.write(f"{cmd}\n".encode())
             except Exception as e:
                 self.logger.error(f"MachineCommand WRITE ERROR: {cmd} -> {e}")
                 return f"Error: {e}"
-            
-            # 讀取回應
-            response = ""
-            start_time = time.time()
-            
-            # 針對機械動作指令延長等待時間
-            timeout = 20 if cmd in ["open", "close", "reopen"] else 10
 
-            while (time.time() - start_time) < timeout:
-                try:
-                    if self.ser.in_waiting:
-                        line = self.ser.readline().decode().strip()
-                        self.logger.debug(f"Received raw: {line}")
-                        response = line  # Keep updating the last response
-                        low = line.lower()
+            # 讀取
+            if cmd in QUERY_COMMANDS:
+                result = self._read_query_response(cmd)
+            else:
+                result = self._read_action_response(cmd)
 
-                        # 若回傳純數字且為 action code（雙位數或更大），視為正在執行動作
-                        try:
-                            if line.isdigit():
-                                code = int(line)
-                                # 若為已知一般狀態（0-5），視為非 action
-                                if code in [getattr(self, 'STATE_NOT_INIT', 0), getattr(self, 'STATE_POWER_ON_NOT_HOMED', 1), getattr(self, 'STATE_HOMED', 2), getattr(self, 'STATE_OPENED', 3), getattr(self, 'STATE_CLOSED', 4), getattr(self, 'STATE_SLEEPING', 5)]:
-                                    self.action_in_progress = False
-                                    self.current_action_code = None
-                                else:
-                                    # 例如 11,21,51.. 等動作代碼，標記為執行中
-                                    self.action_in_progress = True
-                                    self.current_action_code = code
-                        except Exception:
-                            pass
+            self.logger.info(f"MachineCommand RECV: {cmd} -> {result!r}")
 
-                        # 即時同步狀態：針對任何指令的回應進行解析，確保狀態與機器實際回應一致
-                        try:
-                            if 'power' in low:
-                                if 'on' in low or 'device power on' in low:
-                                    self.is_sleeping = False
-                                elif 'off' in low or 'power of' in low or 'device power of' in low:
-                                    self.is_sleeping = True
-
-                            if 'homed' in low:
-                                self.is_homed = True
-                                self.homing_in_progress = False
-                                self.is_sleeping = False
-
-                            if 'opened' in low:  # 注意：open 可能是動詞，opened 才是狀態
-                                self.is_sleeping = False
-                                self.is_homed = True
-
-                            if 'sleep' in low or 'dep0' in low or 'standby' in low:
-                                self.is_sleeping = True
-                        except Exception:
-                            pass
-
-                        # 判斷指令是否完成（較寬鬆的比對）
-                        if cmd == "dep1" and "device power on" in low:
-                            break
-                        if cmd == "open" and ("opened" in low or "open" in low):
-                            break
-                        if cmd == "close" and "closed" in low:
-                            break
-                        if cmd.startswith("put") and low.startswith("been put"):
-                            break
-                        if cmd == "homing" and "homed" in low:
-                            break
-                        # 一般狀態查詢指令
-                        if cmd in ["state", "opbm1", "opbm2", "opbm3", "opbm4", "opwd1", "opwd2", "opbhdn", "opbhup"]:
-                            if line:
-                                break
-                        if cmd == "bookok" and low.startswith("book is"):
-                            break
-                except Exception as e:
-                    self.logger.error(f"MachineCommand READ ERROR for {cmd}: {e}")
-                    break
-
-                time.sleep(0.1)
-            
-            self.logger.info(f"MachineCommand RECV: {cmd} -> {response}")
-            
-            # 更新指令時間與類型
             self.last_serial_time = time.time()
             self.last_cmd = cmd
-            
-            # 處理特殊指令的狀態查詢邏輯
+
+            # 部分指令完成後，仍需短暫暫停狀態查詢，避免狀態查詢與機構穩定態錯位
             if cmd == "close":
-                # 機器在觸發 close 時，應該暫停詢問機器狀態 15 秒
-                self.pause_query_until = time.time() + 15
-                
-            elif cmd.startswith("put"):
-                # Put 指令（分類動作）：不設定固定暫停，而是主動輪詢直到完成
-                # 持續詢問狀態直到機器回到穩定狀態，最多不超過 5 分鐘
-                self.logger.info(f"Put command issued. Waiting for completion (max 5 minutes)...")
-                wait_deadline = time.time() + 300  # 5 分鐘 = 300 秒
-                
-                while time.time() < wait_deadline:
-                    time.sleep(1)  # 每 1 秒詢問一次狀態
-                    try:
-                        status = self.get_status()
-                        s = str(status).strip()
-                        
-                        # 若狀態回復為穩定狀態（STATE_HOMED=2 或 STATE_CLOSED=4），視為完成
-                        if s.isdigit():
-                            code = int(s)
-                            if code in [self.STATE_HOMED, self.STATE_CLOSED]:
-                                self.logger.info(f"Put operation completed. Machine state: {code}")
-                                self.action_in_progress = False
-                                self.current_action_code = None
-                                break
-                        else:
-                            self.logger.debug(f"Put operation in progress... Current status: {s}")
-                    except Exception as e:
-                        self.logger.debug(f"Status query during put: {e}")
-                else:
-                    # 超時
-                    self.logger.warning(f"Put operation timeout after 5 minutes")
-                    self.action_in_progress = False
-                    self.current_action_code = None
-            
-            return response
+                self.pause_query_until = time.time() + 5
+
+            return result
+
         finally:
             if lock:
                 try:
@@ -310,199 +273,399 @@ class MachineController:
                 except Exception:
                     pass
 
+    def _read_query_response(self, cmd):
+        """查詢指令：讀第一行非空回應後回傳。timeout 3 秒。"""
+        timeout = 3
+        start = time.time()
+        while time.time() - start < timeout:
+            try:
+                if self.ser.in_waiting:
+                    line = self.ser.readline().decode(errors='ignore').strip()
+                    if not line:
+                        continue
+                    # 過濾掉裝置自身回送的指令 echo
+                    if line.lower() == cmd.lower():
+                        continue
+                    self._apply_response_side_effects(line)
+                    return line
+            except Exception as e:
+                self.logger.error(f"Query read error for {cmd}: {e}")
+                return f"Error: {e}"
+            time.sleep(0.05)
+        return ""
+
+    def _read_action_response(self, cmd):
+        """動作指令：先等 ack/ack-busy/error state，再等完成訊息。"""
+        completion_patterns = ACTION_COMPLETION_PATTERNS.get(cmd, [])
+        action_timeout = ACTION_TIMEOUTS.get(cmd, 30)
+
+        # ── Phase 1：等 ack / ack-busy / error state（或快指令直接給完成）
+        phase1_deadline = time.time() + PHASE1_ACK_TIMEOUT
+        got_ack = False
+        last_line = ""
+
+        while time.time() < phase1_deadline:
+            try:
+                if self.ser.in_waiting:
+                    line = self.ser.readline().decode(errors='ignore').strip()
+                    if not line:
+                        continue
+                    if line.lower() == cmd.lower():
+                        continue
+                    last_line = line
+                    low = line.lower()
+                    self.logger.debug(f"Phase1 RX: {line}")
+                    self._apply_response_side_effects(line)
+
+                    if "ack-busy" in low:
+                        return "ack-busy"
+                    if low.startswith("error state"):
+                        return line
+                    # 快指令可能直接給完成訊息
+                    if self._matches_completion(low, completion_patterns):
+                        return line
+                    if low == "ack" or low.endswith(" ack"):
+                        got_ack = True
+                        break
+                    # 其他行視為雜訊繼續讀
+            except Exception as e:
+                self.logger.error(f"Phase1 read error for {cmd}: {e}")
+                return f"Error: {e}"
+            time.sleep(0.05)
+
+        if not got_ack:
+            self.logger.warning(
+                f"Phase1 timeout for {cmd}; last_line={last_line!r}"
+            )
+            # 若 Phase 1 整段沒收到任何東西，回 timeout；有收到非預期內容則保留
+            return last_line or "timeout"
+
+        # ── Phase 2：等完成訊息
+        self.action_in_progress = True
+        try:
+            phase2_deadline = time.time() + action_timeout
+            while time.time() < phase2_deadline:
+                try:
+                    if self.ser.in_waiting:
+                        line = self.ser.readline().decode(errors='ignore').strip()
+                        if not line:
+                            continue
+                        if line.lower() == cmd.lower():
+                            continue
+                        low = line.lower()
+                        self.logger.debug(f"Phase2 RX: {line}")
+                        self._apply_response_side_effects(line)
+
+                        if self._matches_completion(low, completion_patterns):
+                            return line
+                        if low.startswith("error state"):
+                            return line
+                        # 動作代碼/雜訊忽略
+                except Exception as e:
+                    self.logger.error(f"Phase2 read error for {cmd}: {e}")
+                    return f"Error: {e}"
+                time.sleep(0.1)
+
+            self.logger.warning(
+                f"Phase2 timeout for {cmd} after ack (action_timeout={action_timeout}s)"
+            )
+            return "ack-no-completion"
+        finally:
+            # 完成或超時都清除 action 旗標
+            self.action_in_progress = False
+            self.current_action_code = None
+
+    @staticmethod
+    def _matches_completion(low_line, patterns):
+        for p in patterns:
+            if p.lower() in low_line:
+                return True
+        return False
+
+    def _apply_response_side_effects(self, line):
+        """解析回應字串並同步內部旗標。純更新函式，不拋出例外。"""
+        if not line:
+            return
+        try:
+            low = line.lower()
+
+            # 純數字 state code
+            if line.isdigit():
+                code = int(line)
+                if code == self.STATE_NOT_INIT:
+                    self.is_sleeping = False
+                    self.is_homed = False
+                    self.homing_in_progress = False
+                elif code == self.STATE_POWER_ON_NOT_HOMED:
+                    self.is_sleeping = False
+                    self.is_homed = False
+                    self.homing_in_progress = False
+                elif code == self.STATE_HOMED:
+                    self.is_sleeping = False
+                    self.is_homed = True
+                    self.homing_in_progress = False
+                    # 回到 homed 表示動作已結束
+                    self.action_in_progress = False
+                    self.current_action_code = None
+                elif code == self.STATE_OPENED:
+                    self.is_sleeping = False
+                    self.is_homed = True
+                    self.homing_in_progress = False
+                elif code == self.STATE_CLOSED:
+                    self.is_sleeping = False
+                    self.is_homed = True
+                elif code == self.STATE_SLEEPING:
+                    self.is_sleeping = True
+                    self.is_homed = False
+                    self.homing_in_progress = False
+                return
+
+            # 文字回應
+            if "device power on" in low:
+                self.is_sleeping = False
+            elif "device power of" in low or "device power off" in low:
+                self.is_sleeping = True
+                self.is_homed = False
+
+            # 注意：dep1 在 state 0→1 的回應 "device power on, not homed" 也含 "homed"
+            # 子字串，必須先排除「not homed」才能把它判定為已 homed。
+            if "homed" in low and "not homed" not in low:
+                self.is_homed = True
+                self.homing_in_progress = False
+                self.is_sleeping = False
+
+            if "opened" in low:
+                self.is_sleeping = False
+                self.is_homed = True
+                self.homing_in_progress = False
+
+            if "closed" in low:
+                self.is_sleeping = False
+
+            if low.startswith("been put"):
+                # put 完成 → 機構回到 homed
+                self.action_in_progress = False
+                self.current_action_code = None
+
+            if "canceled" in low or "cancelled" in low:
+                self.action_in_progress = False
+                self.current_action_code = None
+
+            if "reseted" in low:
+                # reset 完成 → state 0
+                self.is_homed = False
+                self.is_sleeping = False
+                self.action_in_progress = False
+                self.current_action_code = None
+        except Exception:
+            pass
+
+    # ─────────────────────────────────────────────────────────────────
+    # 高階 API（給 routes 使用）
+    # ─────────────────────────────────────────────────────────────────
+
     def init_machine(self):
-        """初始化機器
-        策略：
-        1. 檢查狀態。
-        2. 若狀態為 2 (STATE_HOMED)，則視為已就緒，不進行任何操作。
-        3. 若狀態為 5 (STATE_SLEEPING)，嘗試喚醒 (dep1) 並等待狀態變為 2。
-        4. 若上述皆非，則執行完整初始化流程：dep1 (喚醒) -> homing (歸零)。
-        """
+        """初始化機器：若已在 STATE_HOMED 直接返回，否則執行 dep1 → homing。"""
         self.logger.info("Initializing machine: Checking status first...")
-        
+
         try:
             status_resp = self.get_status()
             s = str(status_resp).strip()
-            
-            # 若為狀態 2，直接回傳
+
             if s.isdigit() and int(s) == self.STATE_HOMED:
-                self.logger.info(f"Machine is already HOMED (state {s}). Initialization skipped.")
+                self.logger.info(f"Machine already HOMED (state {s}). Init skipped.")
                 self.is_homed = True
                 self.initialized = True
                 self.is_sleeping = False
                 return True
-            
-            # 若為狀態 5 (休眠)，嘗試喚醒並檢查是否回到 2
+
             if s.isdigit() and int(s) == self.STATE_SLEEPING:
-                self.logger.info("Machine is SLEEPING (state 5). Waking up (dep1)...")
-                self._send_command("dep1")
+                self.logger.info("Machine SLEEPING. Waking (dep1)...")
+                dep1_resp = self._send_command("dep1")
                 self.is_sleeping = False
-                self.last_action_time = time.time()
-                
-                # 等待一小段時間讓狀態更新
-                time.sleep(1.0)
-                
-                # 再次檢查狀態
-                status_resp = self.get_status()
-                s = str(status_resp).strip()
-                if s.isdigit() and int(s) == self.STATE_HOMED:
-                     self.logger.info(f"Machine woke up to HOMED (state {s}). Initialization skipped.")
-                     self.is_homed = True
-                     self.initialized = True
-                     return True
-                else:
-                     self.logger.info(f"Machine woke up but state is {s} (not 2). Proceeding to homing.")
-                
+                # dep1 從 state 5 → state 2 (已 homed)；若回 "device power on" 即可
+                if is_completion("dep1", dep1_resp):
+                    # 確認 state 是否真為 2
+                    time.sleep(0.5)
+                    check = self.get_status()
+                    if str(check).strip().isdigit() and int(str(check).strip()) == self.STATE_HOMED:
+                        self.is_homed = True
+                        self.initialized = True
+                        return True
         except Exception as e:
-            self.logger.warning(f"init_machine: status check failed: {e}")
+            self.logger.warning(f"init_machine status check failed: {e}")
 
-        # 若非狀態 2 (或喚醒失敗)，開始初始化
-        self.logger.info("Machine not in HOMED state. Performing full initialization.")
-
-        # 1. 喚醒 (dep1)
-        # 無論目前是否開啟，發送 dep1 確保機器喚醒
-        self.logger.info("Sending 'dep1'...")
-        self._send_command("dep1")
+        self.logger.info("Performing full initialization (dep1 + homing).")
+        dep1_resp = self._send_command("dep1")
         self.is_sleeping = False
         self.last_action_time = time.time()
-        
-        # 2. 歸零 (homing)
-        self.logger.info("Sending 'homing'...")
-        resp = self._send_command("homing")
-        
-        # 判斷歸零是否成功
-        homed = False
-        try:
-            s_resp = str(resp).lower()
-            if "homed" in s_resp or "ack" in s_resp:
-                homed = True
-            
-            # 再次確認狀態
-            if not homed:
-                final_status = self.get_status()
-                if str(final_status).strip() == str(self.STATE_HOMED):
+        if is_busy_response(dep1_resp):
+            self.logger.warning(f"dep1 returned busy: {dep1_resp}")
+
+        homing_resp = self._send_command("homing")
+        homed = is_completion("homing", homing_resp)
+        if not homed:
+            # 退而求其次：查 state
+            try:
+                final = self.get_status()
+                if str(final).strip() == str(self.STATE_HOMED):
                     homed = True
-        except Exception:
-            pass
+            except Exception:
+                pass
 
         self.is_homed = homed
         self.initialized = True
-        return self.is_homed
+        return homed
 
     def wake_up(self):
-        """喚醒機器 (dep1)。
+        """喚醒：發 dep1 並等到完成訊息才回傳。
 
-        行為：
-        - 發出 dep1 並把 is_sleeping 設為 False。
-        - 依指示：初始化只需開機執行一次，喚醒時僅需傳遞開機指令，不需額外 homing。
+        依規格 §8 dep1：
+        - state 5 → state 2 (Ready, homed)         回 "device power on"
+        - state 0 → state 1 (Power on, not homed)  回 "device power on, not homed"
+
+        正常路徑只會走 state 5→2；落到 state 1 時 caller 之後沒辦法直接送動作指令
+        （_send_command 在 woke 後會等 is_homed=True 才放行）。為了讓 wake_up 的
+        post-condition「回 True 即可直接送下一個動作」成立，這裡若發現是 state 1
+        就同步補一次 homing。
         """
-        if self.is_sleeping:
-            self.logger.info("Waking up machine (sending dep1)...")
-            self._send_command("dep1")
-            self.is_sleeping = False
-            
-            # 更新狀態旗標，假設喚醒後為正常待機狀態
-            # 若之前已是 homed，喚醒後理應保持 homed (除非斷電)
-            # 這裡不主動觸發 homing，除非外部顯式呼叫
-            # 假設喚醒後即回復到 ready (homed) 狀態，以免 open_door 等待 homed 超時
+        if not self.is_sleeping:
+            return True
+        self.logger.info("Waking up machine (dep1)...")
+        resp = self._send_command("dep1")
+        if not is_completion("dep1", resp):
+            self.logger.warning(f"wake_up: dep1 did not complete: {resp!r}")
+            return False
+        self.is_sleeping = False
+        low = str(resp).lower()
+        # 規格的「device power on, not homed」對應 state 1；單純「device power on」對應 state 2
+        if "not homed" in low:
+            self.logger.info("wake_up: woke to state 1 (not homed), performing homing")
+            self._homing_sync()
+        else:
             self.is_homed = True
+        self.logger.info(f"wake_up done: is_homed={self.is_homed}")
+        return self.is_homed
 
     def check_idle(self):
-        """檢查是否閒置超時，若超時則先嘗試回原點（homing）再進入休眠 (dep0)。
+        """檢查閒置超時 → 依當前 state 決定 cancel / homing / 直接 dep0。
 
-        為避免機器在非標準狀態（例如 state 4）下直接進入休眠造成錯誤：
-        - 若尚未 homed，會同步執行 homing（短暫等待），更新 is_homed。
-        - homing 若失敗或超時，仍會記錄 warning，然後嘗試送 dep0（避免長時間佔用）。
+        規格 §8：dep0 從 state 2 → state 5（也支援 state 1 → 0）。其他 state 下 dep0
+        會被機構拒絕，需要先把機構帶回合法狀態。
+
+        策略：
+        - state 2：直接 dep0（最常見，跳過 homing 節省 10-20s）
+        - state 3：先 cancel（→ state 2）再 dep0
+        - state 4：cancel 規格上不允許，改 homing（→ state 2）再 dep0
+        - 其他/未知：homing 再 dep0
         """
-        if not self.is_sleeping and (time.time() - self.last_action_time) > self.IDLE_TIMEOUT:
-            # 先嘗試回原點，僅在需要時執行
-            try:
-                self.logger.info("Idle timeout: attempting homing before entering sleep")
-                if not getattr(self, 'is_homed', False) and not getattr(self, 'homing_in_progress', False):
-                    # 同步執行 homing，避免在非標準狀態直接進入 dep0
-                    self.homing_in_progress = True
-                    resp = self._send_command("homing")
-                    self.logger.info(f"Homing before sleep response: {resp}")
-                    try:
-                        ok = ("homed" in str(resp).lower()) or ("ack" in str(resp).lower())
-                    except Exception:
-                        ok = False
-                    self.is_homed = bool(ok)
-            except Exception as e:
-                self.logger.warning(f"Homing before sleep failed: {e}")
-            finally:
-                # 無論 homing 成敗，清除 homing flag
-                self.homing_in_progress = False
+        if self.is_sleeping or (time.time() - self.last_action_time) <= self.IDLE_TIMEOUT:
+            return
 
-            # 再進入休眠
-            self.logger.info("Machine idle timeout, entering sleep mode (dep0)")
-            self._send_command("dep0")
+        try:
+            status = self.get_status()
+            s = str(status).strip()
+            code = int(s) if s.isdigit() else None
+        except Exception as e:
+            self.logger.warning(f"check_idle: state query failed: {e}")
+            code = None
+
+        if code == self.STATE_HOMED:
+            self.logger.info("Idle timeout: state 2 (homed), going to dep0 directly")
+        elif code == self.STATE_OPENED:
+            self.logger.info("Idle timeout: state 3 (opened), sending cancel before dep0")
+            resp = self._send_command("cancel")
+            if not is_completion("cancel", resp):
+                self.logger.warning(
+                    f"check_idle cancel did not complete: {resp!r}, falling back to homing"
+                )
+                self._homing_sync()
+        elif code == self.STATE_CLOSED:
+            self.logger.info("Idle timeout: state 4 (closed), homing before dep0")
+            self._homing_sync()
+        else:
+            self.logger.info(
+                f"Idle timeout: state {code} (unexpected), homing before dep0"
+            )
+            self._homing_sync()
+
+        self.logger.info("Sending dep0 (sleep)")
+        resp = self._send_command("dep0")
+        if is_completion("dep0", resp):
             self.is_sleeping = True
-            # 進入休眠後，homed 狀態失效
             self.is_homed = False
+        else:
+            self.logger.warning(f"dep0 did not complete: {resp!r}")
+
+    def _homing_sync(self):
+        """同步執行 homing 並更新 is_homed / homing_in_progress 旗標。"""
+        self.homing_in_progress = True
+        try:
+            resp = self._send_command("homing")
+            self.is_homed = is_completion("homing", resp)
+        finally:
+            self.homing_in_progress = False
 
     def open_door(self):
-        """開啟投書口 (智慧判斷狀態)
-        - 若機器處於睡眠，先喚醒並等待 homing 完成（會以 HOMING_WAIT_TIMEOUT 為上限）。
-        - 若 homing 未完成則會等待；超時則回傳 False，避免送出 open 導致機器錯誤。
-        """
-        # 若在睡眠，先喚醒（會觸發非同步 homing）
+        """開啟投書口；只認 `opened` 完成訊息。"""
         if self.is_sleeping:
-            self.logger.info("open_door requested: machine sleeping, calling wake_up() first")
+            self.logger.info("open_door: machine sleeping, waking first")
             self.wake_up()
-        
-        # 等待 homing 完成（若有在進行或尚未 homed）
-        wait_deadline = time.time() + getattr(self, 'HOMING_WAIT_TIMEOUT', 30)
-        if getattr(self, 'homing_in_progress', False) or not getattr(self, 'is_homed', False):
-            self.logger.info(f"Waiting up to {self.HOMING_WAIT_TIMEOUT}s for homing to complete before open")
+
+        # 等 homing 完成
+        if self.homing_in_progress or not self.is_homed:
+            wait_deadline = time.time() + self.HOMING_WAIT_TIMEOUT
+            self.logger.info(f"Waiting up to {self.HOMING_WAIT_TIMEOUT}s for homing")
             while time.time() < wait_deadline:
-                if not getattr(self, 'homing_in_progress', False) and getattr(self, 'is_homed', False):
+                if not self.homing_in_progress and self.is_homed:
                     break
                 time.sleep(0.1)
             else:
                 self.logger.warning("open_door aborted: homing did not complete in time")
                 return False
-        
-        # 目前已喚醒且 homed，安全發送 open 指令
+
         resp = self._send_command("open")
-        
-        # 若成功開啟 (收到 opened 為主，若超時但有收到 ack 也視為成功)
-        if "opened" in resp or "ack" in resp:
+
+        if is_completion("open", resp):
             return True
-            
-        # 若已在開啟狀態 (State 3)，視為成功
-        if "error state 3" in resp:
-            return True
-            
-        # 若處於等待確認狀態 (State 4)，則應使用 reopen
-        if "error state 4" in resp:
-            self.logger.info("Machine in state 4, switching to 'reopen' command")
-            return self.reopen_door()
-            
+        if is_busy_response(resp):
+            self.logger.warning(f"open_door got ack-busy: {resp}")
+            return False
+        if is_error_state_response(resp):
+            # state 4 → 應改 reopen；state 3 → 已開
+            low = str(resp).lower()
+            if "state 4" in low:
+                self.logger.info("Machine in state 4, switching to reopen")
+                return self.reopen_door()
+            if "state 3" in low:
+                return True
+            self.logger.warning(f"open_door got error state: {resp}")
+            return False
+        self.logger.warning(f"open_door inconclusive resp: {resp!r}")
         return False
 
     def reopen_door(self):
-        """重新開啟投書口 (用於書籍未放妥時)"""
+        """重新開啟投書口 (書未放妥時)。只認 `opened`。"""
         resp = self._send_command("reopen")
-        # 若已在開啟狀態 (State 3)，視為成功
-        if "error state 3" in resp:
+        if is_completion("reopen", resp):
             return True
-        return "opened" in resp
+        if is_error_state_response(resp) and "state 3" in str(resp).lower():
+            return True
+        return False
 
     def close_door(self):
-        """關閉投書口"""
+        """關閉投書口；只認 `closed`。"""
         resp = self._send_command("close")
-        
-        # 若成功關閉 (收到 closed 為主，若超時但有收到 ack 也視為成功)
-        if "closed" in resp or "ack" in resp:
+
+        if is_completion("close", resp):
             return True
-            
-        # 若已在關閉狀態 (State 4)，視為成功
-        if "error state 4" in resp:
+        if is_error_state_response(resp) and "state 4" in str(resp).lower():
             return True
-            
-        # 若失敗，執行斷線重連並歸零
-        self.logger.warning("close_door failed. Executing recovery: Disconnect -> Reconnect -> Homing.")
+        if is_busy_response(resp):
+            self.logger.warning(f"close_door got ack-busy: {resp}")
+            return False
+
+        self.logger.warning(f"close_door failed: {resp!r}. Trying recovery.")
         if not self.simulate:
             with self.lock:
                 try:
@@ -510,7 +673,6 @@ class MachineController:
                         self.ser.close()
                 except Exception:
                     pass
-                
                 try:
                     time.sleep(1)
                     self.ser = serial.Serial(
@@ -519,126 +681,39 @@ class MachineController:
                         bytesize=serial.EIGHTBITS,
                         parity=serial.PARITY_NONE,
                         stopbits=serial.STOPBITS_ONE,
-                        timeout=2
+                        timeout=2,
                     )
                     self.logger.info("Recovery: Serial reconnected.")
-                    # 這裡調用 _send_command 會再次 acquire lock，因為是 RLock 所以沒問題
                     self._send_command("homing")
                 except Exception as e:
                     self.logger.error(f"Recovery failed: {e}")
-
         return False
 
     def check_book_status(self):
-        """檢查書籍是否放妥 (bookok)"""
+        """檢查書籍是否放妥 (bookok)。"""
         resp = self._send_command("bookok")
-        return "book is ok" in resp
+        return "book is ok" in str(resp).lower()
 
     def sort_book(self, bin_number=1):
-        """分類書籍 (put1 or put2)"""
-        cmd = f"put{bin_number}"
+        """分類書籍 (put1 / put2)；只認 `been put{n}` 完成訊息。"""
+        cmd = f"put{int(bin_number)}"
         resp = self._send_command(cmd)
-        return f"been {cmd}" in resp
+        return is_completion(cmd, resp)
 
     def get_status(self):
-        """獲取機器狀態並同步內部旗標。
-        
-        - 會嘗試解析機器回傳的數字狀態（例如 "2"）或文字回應，
-          並更新 self.is_sleeping / self.is_homed / self.homing_in_progress 等旗標，
-          以避免外層因為未同步內部狀態而誤判為 sleeping。
-        - 回傳原始回應（string/int 可接受），不拋出例外。
-        """
-        resp = self._send_command("state")
-        try:
-            s = str(resp).strip() if resp is not None else ""
-            low = s.lower()
-            # 如果回傳純數字（例如 "2"），轉換並同步內部狀態
-            if s.isdigit():
-                code = int(s)
-                # STATE constants 存於實例屬性
-                try:
-                    if code == getattr(self, 'STATE_NOT_INIT', 0):
-                        # 0 = not init：不要把它誤判為休眠，標記為未初始化（非休眠）
-                        self.is_sleeping = False
-                        self.is_homed = False
-                        self.homing_in_progress = False
-                    elif code == getattr(self, 'STATE_POWER_ON_NOT_HOMED', 1):
-                        self.is_sleeping = False
-                        self.is_homed = False
-                        self.homing_in_progress = False
-                    elif code == getattr(self, 'STATE_HOMED', 2):
-                        self.is_sleeping = False
-                        self.is_homed = True
-                        self.homing_in_progress = False
-                    elif code == getattr(self, 'STATE_OPENED', 3):
-                        self.is_sleeping = False
-                        # door open 理當表示不在 homing 且視為就緒
-                        self.is_homed = True
-                        self.homing_in_progress = False
-                    elif code == getattr(self, 'STATE_CLOSED', 4):
-                        self.is_sleeping = False
-                    elif code == 5:
-                        # 部分設備使用 5 表示休眠/待機（device-specific）
-                        self.is_sleeping = True
-                        self.is_homed = False
-                        self.homing_in_progress = False
-                    else:
-                        # 未知 code，保持現狀但嘗試保守處理（不強制喚醒）
-                        self.is_sleeping = False
-                except Exception:
-                    # 若更新旗標失敗，不影響回傳
-                    pass
-                return s
-            # 文字型回應解析（舊設備可能回傳描述字串）
-            # 處理電源/休眠字串：涵蓋「power on / power off / device power on / device power off」
-            try:
-                if 'power' in low:
-                    # 明確包含 on/off
-                    if 'on' in low or 'power on' in low or 'device power on' in low:
-                        self.is_sleeping = False
-                    elif 'off' in low or 'power off' in low or 'device power off' in low or 'device power of' in low or 'power of' in low:
-                        # 部分設備回傳可能有截斷或 typo（如 "device power of"），對此保守視為關機/休眠
-                        self.is_sleeping = True
-                # Homed / ACK 表示已完成 homing，且應為非休眠狀態
-                if 'homed' in low or 'ack' in low:
-                    self.is_homed = True
-                    self.homing_in_progress = False
-                    self.is_sleeping = False
-                # Door open 表示已就緒且非休眠
-                if 'open' in low or 'opened' in low:
-                    self.is_sleeping = False
-                    self.is_homed = True
-                    self.homing_in_progress = False
-                # 明確的休眠/待機字串
-                if 'sleep' in low or 'dep0' in low or 'standby' in low:
-                    self.is_sleeping = True
-            except Exception:
-                # 解析非致命；保留現有狀態
-                pass
-            return resp
-        except Exception as e:
-            try:
-                self.logger.debug(f"get_status parse error: {e}")
-            except Exception:
-                pass
-            return resp
-    
+        """讀 state 並同步內部旗標。"""
+        return self._send_command("state")
+
     def is_door_open(self):
-        """檢查投書口是否為開啟狀態，回傳 bool（使用 get_status 的同步旗標或解析回應）。"""
+        """投書口是否開啟。"""
         try:
-            # 優先使用已同步的旗標或直接解析 get_status 的回應
-            # 若已知 machine_state（is_homed 與 ser 回應）則可簡短判定
             resp = self.get_status()
-            s = str(resp).lower() if resp else ""
-            if "open" in s or "opened" in s:
-                return True
-            # 若內部狀態已知且是 homed 且 ser open 但未明確 open，回傳 False（保守）
-            return False
-        except Exception as e:
-            try:
-                self.logger.debug(f"is_door_open probe failed: {e}")
-            except Exception:
-                pass
+            s = str(resp).strip()
+            if s.isdigit():
+                return int(s) == self.STATE_OPENED
+            low = s.lower()
+            return "opened" in low or "open" in low
+        except Exception:
             return False
 
     def close(self):
@@ -646,13 +721,10 @@ class MachineController:
             self.ser.close()
 
     def set_uart(self, port, baudrate):
-        """動態設定 UART 參數並嘗試重連序列埠"""
         with self.lock:
-            self.logger.info(f"Updating UART config -> port: {port}, baudrate: {baudrate}")
+            self.logger.info(f"Updating UART -> port={port}, baudrate={baudrate}")
             self.port = port
             self.baudrate = baudrate
-
-            # 嘗試關閉既有連線，並用新參數重連
             try:
                 if self.ser and self.ser.is_open:
                     try:
@@ -665,19 +737,15 @@ class MachineController:
                     bytesize=serial.EIGHTBITS,
                     parity=serial.PARITY_NONE,
                     stopbits=serial.STOPBITS_ONE,
-                    timeout=2
+                    timeout=2,
                 )
-                self.logger.info(f"Reconnected to machine on {self.port} at {self.baudrate}")
+                self.logger.info(f"Reconnected to {self.port} @ {self.baudrate}")
                 return True
             except Exception as e:
-                self.logger.error(f"Failed to reconnect serial with new UART settings: {e}")
+                self.logger.error(f"Failed to reconnect: {e}")
+                return False
+
     def test_connection(self, port, baudrate):
-        """測試 UART 連線 (不影響當前實例狀態)
-        
-        回傳格式統一為 (bool, message)：
-        - (True, "Port opened successfully") 表示可開啟
-        - (False, "<error message>") 表示失敗原因
-        """
         temp_ser = None
         try:
             temp_ser = serial.Serial(
@@ -686,7 +754,7 @@ class MachineController:
                 bytesize=serial.EIGHTBITS,
                 parity=serial.PARITY_NONE,
                 stopbits=serial.STOPBITS_ONE,
-                timeout=2
+                timeout=2,
             )
             if temp_ser.is_open:
                 return True, "Port opened successfully"
@@ -694,7 +762,6 @@ class MachineController:
         except Exception as e:
             return False, str(e)
         finally:
-            # 僅關閉序列埠，不要在 finally 裡回傳值，避免覆寫前面的回傳
             if temp_ser and temp_ser.is_open:
                 try:
                     temp_ser.close()

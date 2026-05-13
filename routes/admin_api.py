@@ -10,6 +10,7 @@ from pathlib import Path
 
 import shared
 import config as global_config
+from machine_controller import is_completion, is_busy_response, is_error_state_response
 
 admin_api_bp = Blueprint('admin_api', __name__)
 logger = logging.getLogger('admin_api')
@@ -725,8 +726,7 @@ def machine_reset():
                     "message": "重置流程耗時超過 35 秒，請手動檢查",
                     "steps": steps,
                 })
-            dep_low = (dep_resp or "").lower()
-            dep_ok = "power on" in dep_low or "power" in dep_low
+            dep_ok = is_completion("dep1", dep_resp)
             steps.append({"step": "dep1", "ok": dep_ok, "response": dep_resp})
 
             if time.time() > deadline:
@@ -736,7 +736,7 @@ def machine_reset():
                     "steps": steps,
                 })
 
-            # 4. homing：等待 "Homed" 或 "ack"，最多 30 秒（但限制於整體 deadline）
+            # 4. homing：等待 "Homed" 完成訊息（兩階段協定，ack 不算完成），最多 30 秒
             home_deadline = min(time.time() + 30, deadline)
             home_resp, timed_out = _send_with_deadline("homing", home_deadline)
             if timed_out:
@@ -745,8 +745,7 @@ def machine_reset():
                     "message": "重置流程耗時超過 35 秒，請手動檢查",
                     "steps": steps,
                 })
-            home_low = (home_resp or "").lower()
-            home_ok = "homed" in home_low or "ack" in home_low
+            home_ok = is_completion("homing", home_resp)
             steps.append({"step": "homing", "ok": home_ok, "response": home_resp})
 
             overall_ok = dep_ok and home_ok
@@ -784,8 +783,7 @@ def machine_force_homing():
                 "message": "Homing 流程耗時超過 35 秒，請手動檢查",
                 "response": resp,
             })
-        low = (resp or "").lower()
-        ok = "homed" in low or "ack" in low
+        ok = is_completion("homing", resp)
         return jsonify({
             "success": ok,
             "message": "Homing 完成" if ok else f"Homing 回應未確認: {resp}",
@@ -894,8 +892,7 @@ def machine_clear_error():
                 "responses": {"cancel": cancel_resp, "homing": homing_resp},
             })
 
-        low = (homing_resp or "").lower()
-        ok = "homed" in low or "ack" in low
+        ok = is_completion("homing", homing_resp)
         return jsonify({
             "success": ok,
             "message": "錯誤狀態已清除" if ok else "已送出 cancel + homing，但 homing 回應未確認",

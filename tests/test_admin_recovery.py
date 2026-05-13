@@ -194,11 +194,22 @@ class TestForceHoming:
         # 確認真的呼叫 _send_command('homing')
         fake_machine._send_command.assert_any_call('homing')
 
-    def test_ack_also_counts_as_success(self, client, fake_machine):
+    def test_ack_alone_is_not_success(self, client, fake_machine):
+        """規格 2025-12-07：ack 只代表收到指令，必須再等到 'Homed' 才算完成。
+
+        此 test 取代舊版 test_ack_also_counts_as_success，後者測的是當時的 bug
+        行為。"""
         fake_machine._send_command.side_effect = lambda cmd: 'ack'
         rv = client.post('/api/admin/machine/force_homing')
         data = rv.get_json()
-        assert data['success'] is True
+        assert data['success'] is False
+
+    def test_ack_busy_is_not_success(self, client, fake_machine):
+        """ack-busy 代表指令未被執行（機構忙碌中）。"""
+        fake_machine._send_command.side_effect = lambda cmd: 'ack-busy'
+        rv = client.post('/api/admin/machine/force_homing')
+        data = rv.get_json()
+        assert data['success'] is False
 
     def test_no_homed_in_response_is_failure(self, client, fake_machine):
         fake_machine._send_command.side_effect = lambda cmd: 'something else'
