@@ -125,6 +125,20 @@ class TestCounters:
         shared._update_machine_empty_counter("homed")
         assert shared._consecutive_empty_state == 0
 
+    def test_busy_response_neither_increments_nor_resets(self):
+        # 'busy' = _send_command 在 state 指令拿不到 lock 時的回傳值。
+        # 不該當卡死 (會在長動作結束瞬間誤觸發 recovery 把成果回滾)，
+        # 也不該當「正常回應」清掉真正卡住的累計。
+        shared._update_machine_empty_counter("")
+        shared._update_machine_empty_counter("")
+        assert shared._consecutive_empty_state == 2
+        shared._update_machine_empty_counter("busy")
+        shared._update_machine_empty_counter("busy")
+        shared._update_machine_empty_counter("busy")
+        assert shared._consecutive_empty_state == 2  # 不動
+        shared._update_machine_empty_counter("homed")
+        assert shared._consecutive_empty_state == 0
+
     def test_sip2_fail_increments_then_resets(self):
         shared._update_sip2_fail_counter(False)
         shared._update_sip2_fail_counter(False)

@@ -537,8 +537,15 @@ _watchdog_start_time = time.time()
 
 def _update_machine_empty_counter(raw_resp):
     """每次 poll thread 取得 machine state 後呼叫。raw_resp 為 None 或空字串
-    視為「空回應」，連續計數；任何非空回應重置為 0。"""
+    視為「空回應」，連續計數；任何非空回應重置為 0。
+
+    例外：'busy' 是 _send_command 對 state 指令拿不到 lock 時的回傳值
+    （代表正有別的動作 open/close/cancel/put 持鎖，硬體不一定卡），
+    這次 tick 不該計入也不該重置；否則 ~12 秒的長動作期間會累計多筆
+    empty，動作一結束 watchdog 就會送 dep1+homing 把成果回滾。"""
     global _consecutive_empty_state
+    if isinstance(raw_resp, str) and raw_resp.strip() == 'busy':
+        return
     is_empty = raw_resp is None or (isinstance(raw_resp, str) and raw_resp.strip() == '')
     with _watchdog_lock:
         if is_empty:

@@ -90,13 +90,14 @@ class MachineController:
         if getattr(self, 'action_in_progress', False) and cmd not in ["state", "bookok"]:
             self.logger.info(f"MachineCommand BUSY: {cmd} -> ack-busy (action {getattr(self,'current_action_code',None)})")
             return "ack-busy"
-        # 針對 'state' 查詢指令，使用非阻塞或短超時鎖定，避免在執行長時間動作(如 put)時卡死監控執行緒
+        # 針對 'state' 查詢指令，使用非阻塞或短超時鎖定，避免在執行長時間動作(如 put)時卡死監控執行緒。
+        # 拿不到鎖代表正有其他動作 (open/close/cancel/…) 持鎖；硬體不一定卡，
+        # 只是這次不該打擾。回傳 "busy" 而非空字串，讓 watchdog 的「空回應」
+        # 計數器能區分「機器卡死」與「動作進行中」(見 shared._update_machine_empty_counter)。
         if cmd == "state":
             if lock:
-                # 嘗試取得鎖，若失敗(被佔用)則直接放棄此次查詢
                 if not lock.acquire(timeout=0.1):
-                    # self.logger.debug("Skipping state query (lock busy)")
-                    return ""
+                    return "busy"
         else:
             # 其他控制指令則必須等待鎖
             if lock:
