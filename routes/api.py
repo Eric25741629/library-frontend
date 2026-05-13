@@ -234,6 +234,90 @@ def get_status():
     })
 
 
+@api_bp.route('/homepage/book_check')
+def homepage_book_check():
+    """首頁閒置期間偵測投書口是否有殘留書。
+
+    用途：使用者剛開啟首頁時，若機器處於異常狀態（state≠homed/sleeping）
+    或投書口偵測到書（前一輪 return 沒結束乾淨），前端應該擋下掃描流程
+    並顯示「請聯絡管理員」。
+
+    實作：
+      - 不修改背景 poll thread（避免增加 serial 流量）
+      - 前端 entry/idle 時手動 poll 本 endpoint（建議 10s 間隔）
+      - bookok 是 query 指令會 block-acquire machine.lock；為避免拖到動作
+        進行中的請求，這裡先 try-acquire 0.5s，搶不到就回 ok=null（不下結論）
+
+    回傳：
+      {
+        "ok": bool|null,              # True=可掃描；False=異常需要管理員；null=未知（不下結論）
+        "book_present": bool|null,    # True=偵測到書；null=未查詢或查詢失敗
+        "machine_state": str,         # 'homed' / 'opened' / 'closed' / ...
+        "reason": str|null,           # 'book_in_chute' / 'abnormal_state' / 'machine_busy' / 'query_failed'
+      }
+    """
+    cached = shared.get_cached_status()
+    machine_state = cached.get('machine_state', 'unknown')
+
+    # 異常 state 不必查 bookok；直接判定 abnormal_state
+    if machine_state not in ('homed', 'sleeping'):
+        return jsonify({
+            "ok": False,
+            "book_present": None,
+            "machine_state": machine_state,
+            "reason": "abnormal_state",
+        })
+
+    machine = getattr(shared, 'machine', None)
+    if machine is None or not hasattr(machine, 'check_book_status'):
+        return jsonify({
+            "ok": None,
+            "book_present": None,
+            "machine_state": machine_state,
+            "reason": "machine_unavailable",
+        })
+
+    lock = getattr(machine, 'lock', None)
+    if lock is not None and not lock.acquire(timeout=0.5):
+        return jsonify({
+            "ok": None,
+            "book_present": None,
+            "machine_state": machine_state,
+            "reason": "machine_busy",
+        })
+    try:
+        try:
+            book_present = bool(machine.check_book_status())
+        except Exception as e:
+            logger.warning(f"homepage_book_check: bookok query failed: {e}")
+            return jsonify({
+                "ok": None,
+                "book_present": None,
+                "machine_state": machine_state,
+                "reason": "query_failed",
+            })
+    finally:
+        if lock is not None:
+            try:
+                lock.release()
+            except Exception:
+                pass
+
+    if book_present:
+        return jsonify({
+            "ok": False,
+            "book_present": True,
+            "machine_state": machine_state,
+            "reason": "book_in_chute",
+        })
+    return jsonify({
+        "ok": True,
+        "book_present": False,
+        "machine_state": machine_state,
+        "reason": None,
+    })
+
+
 @api_bp.route('/events')
 def events():
     """Server-Sent Events endpoint — 狀態變化時主動推給前端。
