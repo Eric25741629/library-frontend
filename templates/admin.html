@@ -1015,6 +1015,27 @@
         </div>
     </div>
 
+    <!-- 預約書通知 Modal：進入後台時若箱內有預約書，立刻彈出醒目提示 -->
+    <div id="reservation-alert" style="display:none; position:fixed; inset:0; background:rgba(20, 26, 51, 0.55); z-index:10000; align-items:center; justify-content:center; backdrop-filter: blur(3px);">
+        <div style="background:#fff; max-width:560px; width:92%; max-height:80vh; overflow-y:auto; border-radius:16px; padding:28px; box-shadow:0 20px 60px rgba(0,0,0,0.25); border-top:6px solid #d57500;">
+            <div style="display:flex; align-items:center; gap:14px; margin-bottom:18px;">
+                <div style="width:48px; height:48px; border-radius:50%; background:rgba(255, 140, 0, 0.15); display:flex; align-items:center; justify-content:center;">
+                    <i class="fas fa-bookmark" style="font-size:22px; color:#d57500;"></i>
+                </div>
+                <div>
+                    <h2 style="margin:0; font-size:20px; color:var(--text-primary);">{{ t('admin.reservation_alert.title', '箱內有預約書') }}</h2>
+                    <p style="margin:4px 0 0; font-size:13px; color:var(--text-secondary);" id="reservation-alert-subtitle"></p>
+                </div>
+            </div>
+            <div id="reservation-alert-list" style="margin-bottom:20px;"></div>
+            <div style="display:flex; justify-content:flex-end; gap:12px;">
+                <button class="btn btn-primary" onclick="closeReservationAlert()" style="background:#d57500; border-color:#d57500;">
+                    <i class="fas fa-check"></i> {{ t('admin.reservation_alert.ack', '我知道了') }}
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- Loading Overlay -->
     <div id="loading-overlay" style="display:none; position:fixed; inset:0; background:rgba(255,255,255,0.8); z-index:9999; align-items:center; justify-content:center; backdrop-filter: blur(2px);">
         <div style="text-align:center;">
@@ -1034,6 +1055,9 @@
             status_in_box: "{{ t('admin.table.in_box', '已入箱') }}",
             status_taken: "{{ t('admin.table.taken', '已取出') }}",
             reservation_badge: "{{ t('admin.table.reservation', '已預約') }}",
+            reservation_alert_subtitle: "{{ t('admin.reservation_alert.subtitle', '本書已有讀者預約，請通知預約者或單獨處理') }}",
+            reservation_alert_count: "{{ t('admin.reservation_alert.count', '共 {n} 本') }}",
+            reservation_alert_bin: "{{ t('admin.reservation_alert.bin', '分類箱 {n}') }}",
             confirm_clear_history: "{{ t('admin.confirm.clear_history', '確定要清空所有還書紀錄嗎？') }}",
             confirm_clear_box: "{{ t('admin.confirm.clear_box', '確定要清空還書箱內容物嗎？') }}",
             alert_history_cleared: "{{ t('admin.alert.history_cleared', '紀錄已清空') }}",
@@ -1104,6 +1128,54 @@
         // Initialization
         let currentViewMode = 'current'; // 'current' or 'history'
         let cachedData = null;
+        // 預約書 modal 只在本次頁面載入時彈一次；按「我知道了」後切到 banner 形態，
+        // 5 秒輪詢不會再強制彈出（否則管理員一直被打斷無法操作）
+        let reservationAlertDismissed = false;
+
+        function closeReservationAlert() {
+            const el = document.getElementById('reservation-alert');
+            if (el) el.style.display = 'none';
+            reservationAlertDismissed = true;
+        }
+
+        function maybeShowReservationAlert(currentLogs) {
+            const reserved = (currentLogs || []).filter(l => l.reservation_notice);
+            const alertEl = document.getElementById('reservation-alert');
+            if (!alertEl) return;
+            if (reserved.length === 0 || reservationAlertDismissed) {
+                alertEl.style.display = 'none';
+                return;
+            }
+            // 更新副標題與清單
+            const subtitle = document.getElementById('reservation-alert-subtitle');
+            if (subtitle) {
+                subtitle.textContent =
+                    ADMIN_I18N.reservation_alert_subtitle + ' · ' +
+                    ADMIN_I18N.reservation_alert_count.replace('{n}', reserved.length);
+            }
+            const listEl = document.getElementById('reservation-alert-list');
+            if (listEl) {
+                listEl.innerHTML = reserved.map(b => {
+                    const safeTitle = String(b.title || '').replace(/[<>&]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));
+                    const safeId = String(b.book_id || '').replace(/[<>&]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));
+                    const binText = b.target_bin ? ADMIN_I18N.reservation_alert_bin.replace('{n}', b.target_bin) : '';
+                    const safeNotice = String(b.reservation_notice || '').replace(/[<>&]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));
+                    return `
+                        <div style="padding:14px 16px; margin-bottom:10px; background:rgba(255, 140, 0, 0.06); border-left:4px solid #d57500; border-radius:8px;">
+                            <div style="font-weight:600; color:var(--text-primary); margin-bottom:6px;">
+                                <i class="fas fa-book" style="color:#d57500; margin-right:6px;"></i>${safeTitle}
+                            </div>
+                            <div style="font-size:13px; color:var(--text-secondary); margin-bottom:6px;">
+                                <span style="font-family:monospace; background:#f4f7f6; padding:2px 6px; border-radius:4px;">${safeId}</span>
+                                ${binText ? `<span style="margin-left:10px;">${binText}</span>` : ''}
+                            </div>
+                            <div style="font-size:12px; color:#7a6235; line-height:1.5;">${safeNotice}</div>
+                        </div>
+                    `;
+                }).join('');
+            }
+            alertEl.style.display = 'flex';
+        }
 
         document.addEventListener('DOMContentLoaded', () => {
             fetchLogs();
@@ -1298,6 +1370,9 @@
                 currentLogs = data.logs || [];
                 historyLogs = data.history_logs || [];
             }
+
+            // 進管理員後台時若箱內有預約書，彈視窗醒目提示一次（按「我知道了」後不再彈）
+            maybeShowReservationAlert(currentLogs);
             
             // Decide which list to show
             const displayLogs = currentViewMode === 'current' ? currentLogs : historyLogs;
