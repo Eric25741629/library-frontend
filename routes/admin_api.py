@@ -71,8 +71,8 @@ def clear_logs():
                       target_bin INTEGER)''')
                       
         current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        conn.execute('''INSERT INTO box_history (book_id, title, image_url, return_time, clear_time, target_bin, reservation_notice)
-                SELECT book_id, title, image_url, return_time, ?, target_bin, reservation_notice FROM box_inventory''', (current_time,))
+        conn.execute('''INSERT INTO box_history (book_id, title, image_url, return_time, clear_time, target_bin, reservation_notice, reservation_acknowledged_at)
+                SELECT book_id, title, image_url, return_time, ?, target_bin, reservation_notice, reservation_acknowledged_at FROM box_inventory''', (current_time,))
         
         conn.execute('DELETE FROM box_inventory')
         conn.commit()
@@ -98,8 +98,8 @@ def clear_box():
                       target_bin INTEGER)''')
                       
         current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        conn.execute('''INSERT INTO box_history (book_id, title, image_url, return_time, clear_time, target_bin, reservation_notice)
-                SELECT book_id, title, image_url, return_time, ?, target_bin, reservation_notice FROM box_inventory''', (current_time,))
+        conn.execute('''INSERT INTO box_history (book_id, title, image_url, return_time, clear_time, target_bin, reservation_notice, reservation_acknowledged_at)
+                SELECT book_id, title, image_url, return_time, ?, target_bin, reservation_notice, reservation_acknowledged_at FROM box_inventory''', (current_time,))
         
         conn.execute('DELETE FROM box_inventory')
         conn.commit()
@@ -131,6 +131,46 @@ def clear_history():
     finally:
         conn.close()
     return jsonify({"success": True, "message": "歷史紀錄已清空"})
+
+
+@admin_api_bp.route('/acknowledge_reservation', methods=['POST'])
+def acknowledge_reservation():
+    """標記指定書籍的預約通知已被管理員看過。
+    後續 fetchLogs 仍會帶回 reservation_notice（badge 仍顯示），但 modal 不再彈。
+    傳入 {"book_ids": ["C295901", ...]}；空陣列代表 ack 目前所有預約書。"""
+    payload = request.get_json(silent=True) or {}
+    raw_ids = payload.get('book_ids')
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    conn = shared.get_box_db()
+    try:
+        if isinstance(raw_ids, list) and raw_ids:
+            placeholders = ','.join('?' for _ in raw_ids)
+            sql = (
+                f"UPDATE box_inventory SET reservation_acknowledged_at = ? "
+                f"WHERE reservation_notice IS NOT NULL "
+                f"AND reservation_acknowledged_at IS NULL "
+                f"AND book_id IN ({placeholders})"
+            )
+            conn.execute(sql, [now, *raw_ids])
+        else:
+            conn.execute(
+                "UPDATE box_inventory SET reservation_acknowledged_at = ? "
+                "WHERE reservation_notice IS NOT NULL "
+                "AND reservation_acknowledged_at IS NULL",
+                (now,),
+            )
+        conn.commit()
+        acked = conn.execute(
+            "SELECT COUNT(*) FROM box_inventory "
+            "WHERE reservation_acknowledged_at = ?",
+            (now,),
+        ).fetchone()[0]
+    except Exception as e:
+        logger.error(f"acknowledge_reservation error: {e}")
+        return jsonify({"success": False, "message": "更新失敗"}), 500
+    finally:
+        conn.close()
+    return jsonify({"success": True, "acknowledged": acked})
 
 
 @admin_api_bp.route('/stop_frontend', methods=['POST'])

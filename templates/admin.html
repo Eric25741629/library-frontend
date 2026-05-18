@@ -1128,24 +1128,41 @@
         // Initialization
         let currentViewMode = 'current'; // 'current' or 'history'
         let cachedData = null;
-        // 預約書 modal 只在本次頁面載入時彈一次；按「我知道了」後切到 banner 形態，
-        // 5 秒輪詢不會再強制彈出（否則管理員一直被打斷無法操作）
+        // 本次 page-load 已關過的預約 modal（避免按完知道後 5s 輪詢又彈）。
+        // 持久化由 server 端 reservation_acknowledged_at 處理：點「我知道了」後
+        // 整批書都會被標記過，重新整理頁面也不會再彈，但新進來的預約書還是會彈。
         let reservationAlertDismissed = false;
+        let reservationAlertPendingIds = [];
 
-        function closeReservationAlert() {
+        async function closeReservationAlert() {
             const el = document.getElementById('reservation-alert');
             if (el) el.style.display = 'none';
             reservationAlertDismissed = true;
+            // 把這批彈窗顯示過的書 ID 送到後端標記，下次重整不會再彈
+            if (reservationAlertPendingIds.length > 0) {
+                try {
+                    await fetch('/api/admin/acknowledge_reservation', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ book_ids: reservationAlertPendingIds }),
+                    });
+                } catch (e) { console.error('acknowledge_reservation failed', e); }
+                reservationAlertPendingIds = [];
+            }
         }
 
         function maybeShowReservationAlert(currentLogs) {
-            const reserved = (currentLogs || []).filter(l => l.reservation_notice);
+            // 只挑「有預約通知且尚未被管理員確認」的書
+            const reserved = (currentLogs || []).filter(
+                l => l.reservation_notice && !l.reservation_acknowledged_at
+            );
             const alertEl = document.getElementById('reservation-alert');
             if (!alertEl) return;
             if (reserved.length === 0 || reservationAlertDismissed) {
                 alertEl.style.display = 'none';
                 return;
             }
+            reservationAlertPendingIds = reserved.map(b => b.book_id);
             // 更新副標題與清單
             const subtitle = document.getElementById('reservation-alert-subtitle');
             if (subtitle) {

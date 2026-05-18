@@ -24,6 +24,7 @@ from flask import Flask
 import shared
 import config
 from routes.api import api_bp, _extract_reservation_notice
+from routes.admin_api import admin_api_bp
 
 
 # ---- helper 單元測試 -------------------------------------------------------
@@ -170,6 +171,7 @@ def _patched_env_with_db(tmp_path, machine, sip2):
 def app():
     app = Flask(__name__)
     app.register_blueprint(api_bp, url_prefix='/api')
+    app.register_blueprint(admin_api_bp, url_prefix='/api/admin')
     return app
 
 
@@ -223,3 +225,100 @@ class TestReturnFlowPersistsReservation:
 
         assert row is not None
         assert row[0] is None, '一般還書不應留下 reservation_notice'
+
+
+# ---- /api/admin/acknowledge_reservation ---------------------------------
+
+
+class TestAcknowledgeReservation:
+    """整批 ack：modal 上顯示了 N 本書，按「我知道了」後這 N 本都被打上時間戳；
+    新進來的預約書不受影響，下次重整仍會彈出。"""
+
+    def _seed_box(self, db_path, rows):
+        """rows: list of (book_id, reservation_notice, ack_at)"""
+        conn = sqlite3.connect(db_path)
+        for book_id, notice, ack_at in rows:
+            conn.execute(
+                'INSERT INTO box_inventory (book_id, title, image_url, return_time, target_bin, reservation_notice, reservation_acknowledged_at) '
+                'VALUES (?, ?, ?, ?, ?, ?, ?)',
+                (book_id, f'Book {book_id}', '', '2026-05-18 10:00:00', 1, notice, ack_at),
+            )
+        conn.commit()
+        conn.close()
+
+    def _patch_db(self, tmp_path):
+        db_file = tmp_path / 'box.db'
+        old = shared.BOX_DB_FILE
+        shared.BOX_DB_FILE = str(db_file)
+        shared.init_box_db()
+        return db_file, old
+
+    def test_batch_ack_marks_only_unacknowledged(self, client, tmp_path):
+        db_file, old = self._patch_db(tmp_path)
+        try:
+            self._seed_box(db_file, [
+                ('C001', '此資料有人預約', None),         # 應被 ack
+                ('C002', '此資料有人預約', None),         # 應被 ack
+                ('C003', '此資料有人預約', '2026-05-17 09:00:00'),  # 已 ack，不動
+                ('B999', None, None),                     # 非預約書，不動
+            ])
+            rv = client.post('/api/admin/acknowledge_reservation',
+                             json={'book_ids': ['C001', 'C002']})
+            assert rv.status_code == 200
+            body = rv.get_json()
+            assert body['success'] is True
+            assert body['acknowledged'] == 2
+
+            conn = sqlite3.connect(db_file)
+            rows = {r[0]: r[1] for r in conn.execute(
+                "SELECT book_id, reservation_acknowledged_at FROM box_inventory"
+            ).fetchall()}
+            conn.close()
+            assert rows['C001'] is not None
+            assert rows['C002'] is not None
+            # 已 ack 的時間戳保留原本的，不被覆蓋
+            assert rows['C003'] == '2026-05-17 09:00:00'
+            # 非預約書完全不動
+            assert rows['B999'] is None
+        finally:
+            shared.BOX_DB_FILE = old
+
+    def test_empty_book_ids_acks_all_pending(self, client, tmp_path):
+        """body 不帶 book_ids 或為空陣列時，視為 ack 目前全部未確認預約書。"""
+        db_file, old = self._patch_db(tmp_path)
+        try:
+            self._seed_box(db_file, [
+                ('C100', '此資料有人預約', None),
+                ('C101', '此資料有人預約', None),
+            ])
+            rv = client.post('/api/admin/acknowledge_reservation', json={})
+            assert rv.status_code == 200
+            assert rv.get_json()['acknowledged'] == 2
+            conn = sqlite3.connect(db_file)
+            none_count = conn.execute(
+                "SELECT COUNT(*) FROM box_inventory WHERE reservation_notice IS NOT NULL "
+                "AND reservation_acknowledged_at IS NULL"
+            ).fetchone()[0]
+            conn.close()
+            assert none_count == 0
+        finally:
+            shared.BOX_DB_FILE = old
+
+    def test_new_reservation_book_pops_after_ack(self, client, tmp_path):
+        """ack 過第一批後，新進來的預約書仍會出現在「未確認」清單中。"""
+        db_file, old = self._patch_db(tmp_path)
+        try:
+            self._seed_box(db_file, [('C001', '此資料有人預約', None)])
+            client.post('/api/admin/acknowledge_reservation',
+                        json={'book_ids': ['C001']})
+            # 新書 C002 進來
+            self._seed_box(db_file, [('C002', '此資料有人預約', None)])
+
+            rv = client.get('/api/admin/logs')
+            assert rv.status_code == 200
+            logs = rv.get_json()['logs']
+            unack = [l for l in logs
+                     if l.get('reservation_notice') and not l.get('reservation_acknowledged_at')]
+            assert [l['book_id'] for l in unack] == ['C002']
+        finally:
+            shared.BOX_DB_FILE = old
