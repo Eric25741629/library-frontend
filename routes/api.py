@@ -58,6 +58,23 @@ _SIP2_TRIVIAL_NOTICES = {'還書成功', '還書完成', '歸還成功', '歸還
                          'check-in success', 'checkin success', 'success', 'ok'}
 _SIP2_OVERDUE_KEYWORDS = ('逾期', '過期', '罰款', '滯納', '超過借閱', '欠款')
 
+# 預約通知關鍵字。實務上 SIP2 server 回的 AF/AG 例如：
+# "此資料有人預約，館藏狀態將變更為「預約待取」並寄發預約到館通知。"
+_SIP2_RESERVATION_KEYWORDS = ('預約',)
+
+
+def _extract_reservation_notice(*messages):
+    """從 SIP2 checkin 回傳的 AF/AG 抽取預約通知文字；無則回傳 None。"""
+    for raw in messages:
+        if not raw:
+            continue
+        s = str(raw).strip()
+        if not s:
+            continue
+        if any(k in s for k in _SIP2_RESERVATION_KEYWORDS):
+            return s
+    return None
+
 # 圖書館系統拒絕還書時，若 AF/AG/error_message 含下列任一關鍵字，視為「已歸還」case。
 # 實務上常見的情境是：第一次掃描→關門→checkin 成功，但回應在網路上掉了，前端誤判失敗
 # 觸發重開門讓使用者再放一次；第二次 checkin 時 SIP2 server 回 "館藏資料異常請洽櫃台"
@@ -793,6 +810,7 @@ def return_book():
         _set_return_stage("checkin", "連線圖書館系統還書")
         for b_id in book_ids:
             checkin_success = True
+            reservation_notice = None
             if not attachment_only:
                 # 檢查是否啟用真實還書功能
                 config.reload_config()  # 重新載入配置
@@ -838,6 +856,10 @@ def return_book():
                             classified = _classify_sip2_notice(raw)
                             if classified:
                                 notice_messages.append(classified)
+                        # 抽取預約通知（會寫進 box_inventory.reservation_notice 給後台顯示）
+                        reservation_notice = _extract_reservation_notice(af_msg, ag_msg)
+                        if reservation_notice:
+                            logger.info(f"Book {b_id} has reservation: {reservation_notice}")
                     else:
                         logger.warning(f"Real checkin failed for book: {b_id} (af={af_msg!r} ag={ag_msg!r} err={error_msg!r})")
                         all_checkin_success = False
@@ -901,14 +923,17 @@ def return_book():
                 except Exception:
                     target_bin = selected_bin or _compute_target_bin(location, b_id)
 
-                cursor.execute('INSERT INTO box_inventory (book_id, title, image_url, return_time, target_bin) VALUES (?, ?, ?, ?, ?)',
-                               (b_id, title, image_url, current_time, target_bin))
+                cursor.execute(
+                    'INSERT INTO box_inventory (book_id, title, image_url, return_time, target_bin, reservation_notice) VALUES (?, ?, ?, ?, ?, ?)',
+                    (b_id, title, image_url, current_time, target_bin, reservation_notice),
+                )
 
                 returned_books.append({
                     "book_id": b_id,
                     "title": title,
                     "return_time": current_time,
-                    "target_bin": target_bin
+                    "target_bin": target_bin,
+                    "reservation_notice": reservation_notice,
                 })
         # 若有任何一本書還書指令失敗，則：
         # 1) 回滾本次交易，不記錄到本地 box_inventory

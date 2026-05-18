@@ -71,8 +71,8 @@ def clear_logs():
                       target_bin INTEGER)''')
                       
         current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        conn.execute('''INSERT INTO box_history (book_id, title, image_url, return_time, clear_time, target_bin)
-                SELECT book_id, title, image_url, return_time, ?, target_bin FROM box_inventory''', (current_time,))
+        conn.execute('''INSERT INTO box_history (book_id, title, image_url, return_time, clear_time, target_bin, reservation_notice)
+                SELECT book_id, title, image_url, return_time, ?, target_bin, reservation_notice FROM box_inventory''', (current_time,))
         
         conn.execute('DELETE FROM box_inventory')
         conn.commit()
@@ -98,8 +98,8 @@ def clear_box():
                       target_bin INTEGER)''')
                       
         current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        conn.execute('''INSERT INTO box_history (book_id, title, image_url, return_time, clear_time, target_bin)
-                SELECT book_id, title, image_url, return_time, ?, target_bin FROM box_inventory''', (current_time,))
+        conn.execute('''INSERT INTO box_history (book_id, title, image_url, return_time, clear_time, target_bin, reservation_notice)
+                SELECT book_id, title, image_url, return_time, ?, target_bin, reservation_notice FROM box_inventory''', (current_time,))
         
         conn.execute('DELETE FROM box_inventory')
         conn.commit()

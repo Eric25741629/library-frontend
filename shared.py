@@ -160,9 +160,13 @@ def init_box_db():
         cols = [row[1] for row in c.execute("PRAGMA table_info('box_inventory')").fetchall()]
         if 'target_bin' not in cols:
             c.execute('ALTER TABLE box_inventory ADD COLUMN target_bin INTEGER')
+        if 'reservation_notice' not in cols:
+            c.execute('ALTER TABLE box_inventory ADD COLUMN reservation_notice TEXT')
         cols_h = [row[1] for row in c.execute("PRAGMA table_info('box_history')").fetchall()]
         if 'target_bin' not in cols_h:
             c.execute('ALTER TABLE box_history ADD COLUMN target_bin INTEGER')
+        if 'reservation_notice' not in cols_h:
+            c.execute('ALTER TABLE box_history ADD COLUMN reservation_notice TEXT')
         # Backfill target_bin for legacy rows based on book_id prefix
         c.execute("""
             UPDATE box_inventory

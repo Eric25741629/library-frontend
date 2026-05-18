@@ -288,10 +288,44 @@
         /* Table */
         .table-container {
             overflow-x: auto;
-            /* 當前箱內/歷史列表過長時，卡片內部可垂直捲動；scroll 讓捲軸常駐顯示 */
-            max-height: 520px; /* 稍微放高一點，多顯示幾筆 */
-            overflow-y: scroll;
+            /* 當前箱內/歷史列表過長時，卡片內部可垂直捲動。
+               用 auto 讓資料少時不顯示空捲軸（原本 scroll 即使只有 1 筆也常駐一條） */
+            max-height: 520px;
+            overflow-y: auto;
             position: relative;
+            scrollbar-width: auto;
+        }
+
+        /* 全域 scrollbar 樣式：拉寬到 14px，加深顏色與對比，方便鼠標拖動；
+           原生 8px 在桌面長表格上太細，使用者反映難以抓取 */
+        ::-webkit-scrollbar {
+            width: 14px;
+            height: 14px;
+        }
+        ::-webkit-scrollbar-track {
+            background: rgba(163, 174, 208, 0.08);
+            border-radius: 8px;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: rgba(91, 102, 145, 0.45);
+            border-radius: 8px;
+            border: 3px solid transparent;
+            background-clip: padding-box;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(91, 102, 145, 0.7);
+            border: 3px solid transparent;
+            background-clip: padding-box;
+        }
+        ::-webkit-scrollbar-thumb:active {
+            background: rgba(67, 24, 255, 0.6);
+            border: 3px solid transparent;
+            background-clip: padding-box;
+        }
+        /* Firefox */
+        html {
+            scrollbar-width: auto;
+            scrollbar-color: rgba(91, 102, 145, 0.55) rgba(163, 174, 208, 0.1);
         }
 
         /* 讓表頭固定在滾動區上方，不跟著內容一起滾走 */
@@ -331,6 +365,21 @@
             font-weight: 600;
             background-color: rgba(5, 205, 153, 0.1);
             color: var(--success-color);
+        }
+
+        /* 預約 badge：橘色，提示館員此書是預約書，需特別處理 */
+        .reservation-badge {
+            display: inline-block;
+            margin-left: 8px;
+            padding: 3px 10px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+            background-color: rgba(255, 140, 0, 0.12);
+            color: #d57500;
+            border: 1px solid rgba(255, 140, 0, 0.35);
+            cursor: help;
+            white-space: nowrap;
         }
 
         .book-img {
@@ -984,6 +1033,7 @@
             table_header_clear_time: "{{ t('admin.table.clear_time', '取出時間') }}",
             status_in_box: "{{ t('admin.table.in_box', '已入箱') }}",
             status_taken: "{{ t('admin.table.taken', '已取出') }}",
+            reservation_badge: "{{ t('admin.table.reservation', '已預約') }}",
             confirm_clear_history: "{{ t('admin.confirm.clear_history', '確定要清空所有還書紀錄嗎？') }}",
             confirm_clear_box: "{{ t('admin.confirm.clear_box', '確定要清空還書箱內容物嗎？') }}",
             alert_history_cleared: "{{ t('admin.alert.history_cleared', '紀錄已清空') }}",
@@ -1324,9 +1374,16 @@
                     }
                 }
 
+                // 預約 badge：館員需特別處理（撥電話通知預約者、單獨上架等）
+                let reservationBadge = '';
+                if (log.reservation_notice) {
+                    const safeNotice = String(log.reservation_notice).replace(/"/g, '&quot;');
+                    reservationBadge = ` <span class="reservation-badge" title="${safeNotice}"><i class="fas fa-bookmark"></i> ${ADMIN_I18N.reservation_badge}</span>`;
+                }
+
                 tr.innerHTML = `
                     <td>#${log.id}</td>
-                    <td><span style="font-weight:500;">${log.title}</span></td>
+                    <td><span style="font-weight:500;">${log.title}</span>${reservationBadge}</td>
                     <td><span style="font-family:monospace; background:#f4f7f6; padding:4px 8px; border-radius:6px;">${log.book_id}</span></td>
                     <td>${log.return_time}</td>
                     <td>${lastColumnContent}</td>
