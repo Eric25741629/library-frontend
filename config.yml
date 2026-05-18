@@ -17,7 +17,7 @@ library:
   mock_enabled: false
   port: 6001
 logs:
-  backup_days: 300
+  backup_days: 7
 machine:
   baudrate: 9600
   port: /dev/uno

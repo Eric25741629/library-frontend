@@ -59,7 +59,7 @@ machine = None
 sip2 = None
 
 # --- Logger 設定 ---
-def make_timed_handler(name, backup_days=30):
+def make_timed_handler(name, backup_days=7):
     """建立分資料夾的 TimedRotatingFileHandler：
     logs/
       app/app.log (最新)
@@ -72,13 +72,15 @@ def make_timed_handler(name, backup_days=30):
     history_dir.mkdir(exist_ok=True)
 
     base_file = sub_dir / f'{name}.log'
-    h = TimedRotatingFileHandler(base_file, when='midnight', backupCount=backup_days, encoding='utf-8')
+    # backupCount=0：交由 _rotator 自行清理（檔案被移到 history/，預設清理機制找不到）
+    h = TimedRotatingFileHandler(base_file, when='midnight', backupCount=0, encoding='utf-8')
 
-    # 自訂 rotator：將輪轉出的檔案移到 history 子資料夾
+    # 自訂 rotator：將輪轉出的檔案移到 history 子資料夾，並保留日期後綴；
+    # 接著刪掉超過 backup_days 的舊檔。
     def _rotator(source, dest):
         try:
             src_path = Path(source)
-            dst_path = history_dir / src_path.name
+            dst_path = history_dir / Path(dest).name
             src_path.replace(dst_path)
         except Exception:
             # 若移動失敗，至少維持預設行為
@@ -86,6 +88,21 @@ def make_timed_handler(name, backup_days=30):
                 Path(source).replace(dest)
             except Exception:
                 pass
+            return
+        # 清理：保留最近 backup_days 個輪轉檔
+        try:
+            rotated = sorted(
+                history_dir.glob(f'{name}.log.*'),
+                key=lambda p: p.stat().st_mtime,
+                reverse=True,
+            )
+            for old in rotated[backup_days:]:
+                try:
+                    old.unlink()
+                except Exception:
+                    pass
+        except Exception:
+            pass
 
     h.rotator = _rotator
 
@@ -95,7 +112,7 @@ def make_timed_handler(name, backup_days=30):
 
 def setup_logging():
     global cfg
-    backup_days = int(cfg.get('logs', {}).get('backup_days', 30))
+    backup_days = int(cfg.get('logs', {}).get('backup_days', 7))
     
     # 建立各個 logger
     loggers = ['app', 'machine', 'library', 'frontend']
