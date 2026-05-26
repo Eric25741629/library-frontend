@@ -264,6 +264,20 @@ class MachineController:
             if cmd == "close":
                 self.pause_query_until = time.time() + 5
 
+            # 動作收到非錯誤回應 = serial 是活的 → 清 watchdog empty counter。
+            # 不這樣做的話會有窄競爭：動作前 counter 已經到 2，動作期間 poll 全回
+            # 'busy' counter 停在 2，動作完成後第一個 poll 又剛好空 → counter=3
+            # 觸發 dep1+homing 把剛跑完的動作回滾。state 命令本身已有 counter 管理，
+            # 故只在 action 路徑做；error/time error 不歸零，留給 watchdog 自己判斷。
+            if cmd != "state" and isinstance(result, str):
+                r_low = result.strip().lower()
+                if r_low and not r_low.startswith(("error", "time error")):
+                    try:
+                        import shared as _shared
+                        _shared._watchdog_reset_counters()
+                    except Exception:
+                        pass
+
             return result
 
         finally:

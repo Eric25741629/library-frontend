@@ -400,3 +400,87 @@ class TestCollectMachineStateRawField:
         with patch.object(shared, 'machine', None):
             result = shared._collect_machine_state()
         assert result['_raw_state_resp'] is None
+
+
+# ─── Action 成功路徑會清 empty counter ─────────────────────────────────────────
+
+class TestActionResetsCounter:
+    """動作（非 state）成功收到非錯誤回應 → serial 是活的 → 清 empty counter。
+
+    動機：busy-skip 已封住「動作期間 poll 全跳過」的主路徑，但仍有窄競爭：
+      counter=2 (真實 serial 抽風兩次) → 動作期間 poll 全 busy 停 2
+      → 動作完成 → 下一個 poll 又剛好空 → counter=3 觸發 dep1+homing
+      把剛跑完的動作回滾。
+    動作收到完成訊息證明 serial 通的，直接清零最乾淨。
+    """
+
+    def _make_machine(self):
+        from machine_controller import MachineController
+        m = MachineController(simulate=True)
+        m.ser = MagicMock()
+        m.ser.is_open = True
+        m.is_homed = True
+        m.is_sleeping = False
+        m.homing_in_progress = False
+        # 拖長 last_serial_time 讓 MIN_COMMAND_INTERVAL 不會卡測試
+        m.last_serial_time = 0
+        return m
+
+    def test_successful_action_resets_empty_counter(self):
+        shared._update_machine_empty_counter("")
+        shared._update_machine_empty_counter("")
+        assert shared._consecutive_empty_state == 2
+
+        m = self._make_machine()
+        with patch.object(m, '_read_action_response', return_value='opened'):
+            result = m._send_command('open')
+        assert result == 'opened'
+        assert shared._consecutive_empty_state == 0
+
+    def test_error_state_response_does_not_reset(self):
+        shared._update_machine_empty_counter("")
+        shared._update_machine_empty_counter("")
+        assert shared._consecutive_empty_state == 2
+
+        m = self._make_machine()
+        with patch.object(m, '_read_action_response', return_value='error state 2'):
+            result = m._send_command('open')
+        assert 'error state' in result
+        assert shared._consecutive_empty_state == 2
+
+    def test_serial_not_open_does_not_reset(self):
+        shared._update_machine_empty_counter("")
+        shared._update_machine_empty_counter("")
+        assert shared._consecutive_empty_state == 2
+
+        m = self._make_machine()
+        m.ser.is_open = False
+        result = m._send_command('open')
+        assert result.startswith('Error')
+        assert shared._consecutive_empty_state == 2
+
+    def test_ack_busy_response_still_resets(self):
+        # 韌體回 ack-busy 也證明 serial 通的，照樣清零。
+        shared._update_machine_empty_counter("")
+        shared._update_machine_empty_counter("")
+        assert shared._consecutive_empty_state == 2
+
+        m = self._make_machine()
+        with patch.object(m, '_read_action_response', return_value='ack-busy'):
+            result = m._send_command('open')
+        assert result == 'ack-busy'
+        assert shared._consecutive_empty_state == 0
+
+    def test_state_command_does_not_double_reset(self):
+        # state 命令本身已透過 _update_machine_empty_counter 管理 counter；
+        # _send_command 不該對 state 額外呼叫 reset (避免遮蔽真正的卡死統計)。
+        shared._update_machine_empty_counter("")
+        shared._update_machine_empty_counter("")
+        assert shared._consecutive_empty_state == 2
+
+        m = self._make_machine()
+        with patch.object(m, '_read_query_response', return_value=''):
+            m._send_command('state')
+        # state 走 query 路徑，新加的 reset 邏輯只對 cmd != 'state' 生效，
+        # 所以 counter 不該被新邏輯影響 (仍是 2，由原本的 counter 邏輯管)
+        assert shared._consecutive_empty_state == 2
