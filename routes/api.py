@@ -445,6 +445,11 @@ def scan_book():
     if not book_id:
         return jsonify({"success": False, "message": "請輸入書籍編號"}), 400
 
+    # SIP2 以 `|` 為欄位分隔；含 |/CR/LF 的條碼可能注入額外 SIP2 欄位
+    if any(c in str(book_id) for c in ('|', '\r', '\n')):
+        logger.warning(f"Rejecting barcode with control chars: {book_id!r}")
+        return jsonify({"success": False, "message": "條碼格式不正確"}), 400
+
     # V / VH / D 開頭的條碼一律視為 CD 光碟附件，本機不收，掃描階段就攔下，
     # 不必白白送 SIP2 查詢。沿用 ATTACHMENT_NOT_ACCEPTED code 讓前端可以重用既有 UI。
     disc_kind = _disc_media_kind(book_id)
@@ -617,6 +622,9 @@ def return_book():
         if not attachment_barcode:
             _set_return_stage("error", "缺少附件條碼")
             return jsonify({"success": False, "message": "缺少附件條碼 (attachment_barcode)"}), 400
+        if any(c in str(attachment_barcode) for c in ('|', '\r', '\n')):
+            _set_return_stage("error", "附件條碼格式不正確")
+            return jsonify({"success": False, "message": "附件條碼格式不正確"}), 400
         if attachment_barcode.strip().upper() != book_ids[0].strip().upper():
             _set_return_stage("error", "附件條碼與書籍不符")
             return jsonify({"success": False, "message": "附件條碼與書籍不符，請重新掃描"}), 400

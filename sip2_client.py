@@ -103,6 +103,9 @@ class SIP2Client:
     def get_book_info(self, barcode):
         """17 Item Information"""
         try:
+            if not barcode or any(c in str(barcode) for c in ('|', '\r', '\n')):
+                self.logger.warning(f"Refusing get_book_info with bad barcode: {barcode!r}")
+                return None
             # 17<Date><AO Institution Id><AB Item Identifier><AC Terminal Password>...
             now = datetime.datetime.now().strftime("%Y%m%d    %H%M%S")
             inst = self.institution_id or 'MAIN'
@@ -231,6 +234,14 @@ class SIP2Client:
 
     def checkin_book(self, barcode):
         """09 Checkin"""
+        if not barcode or any(c in str(barcode) for c in ('|', '\r', '\n')):
+            self.logger.warning(f"Refusing checkin_book with bad barcode: {barcode!r}")
+            return {
+                "success": False,
+                "af_message": None,
+                "ag_message": None,
+                "error_message": "Invalid barcode characters"
+            }
         # 09<No block><Date><Return Date><Current Location><Institution Id><Item Identifier><Terminal Password>...
         now = datetime.datetime.now().strftime("%Y%m%d    %H%M%S")
         inst = self.institution_id or 'MAIN'
