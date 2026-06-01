@@ -300,7 +300,15 @@ def init_machine_controller():
     except Exception as e:
         logger.warning(f"Failed to read machine_config.json: {e}")
 
-    machine = MachineController(port=port, baudrate=baudrate)
+    put_confirm_interval = machine_cfg.get('put_confirm_interval', 3.0)
+    put_confirm_deadline = machine_cfg.get('put_confirm_deadline', 60.0)
+
+    machine = MachineController(
+        port=port,
+        baudrate=baudrate,
+        put_confirm_interval=put_confirm_interval,
+        put_confirm_deadline=put_confirm_deadline,
+    )
 
 def init_sip2_client():
     global sip2

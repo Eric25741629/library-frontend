@@ -93,11 +93,16 @@ class MachineController:
     ACTION_COMPLETION_PATTERNS = ACTION_COMPLETION_PATTERNS
     ACTION_TIMEOUTS = ACTION_TIMEOUTS
 
-    def __init__(self, port='/dev/uno', baudrate=19200, simulate=False):
+    def __init__(self, port='/dev/uno', baudrate=19200, simulate=False,
+                 put_confirm_interval=3.0, put_confirm_deadline=60.0):
         """
         simulate: 若為 True，則不開啟序列埠，方便遠端或 CI 在沒有實體設備時測試。
 
         baudrate 預設 19200，與規格 2025-12-07 一致。
+
+        put_confirm_interval / put_confirm_deadline：put 在 action_timeout 內沒回
+        `been put{n}` 時，不立刻判失敗，改在 deadline 內每 interval 秒確認一次
+        （見 sort_book / _confirm_put_completion）。
         """
         self.port = port
         self.baudrate = baudrate
@@ -129,6 +134,13 @@ class MachineController:
         self.HOMING_WAIT_TIMEOUT = 30
 
         self.pause_query_until = 0
+
+        # put 完成確認：action_timeout 內沒回 been put{n} 時的補確認參數。
+        self.PUT_CONFIRM_INTERVAL = float(put_confirm_interval)
+        self.PUT_CONFIRM_DEADLINE = float(put_confirm_deadline)
+        # 任一 reader（command thread 或 poll thread）讀到 `been put{n}` 都會在此
+        # 記下完成時間（bin -> epoch 秒），讓確認迴圈不漏接被別執行緒讀走的推播。
+        self._put_done_at = {}
 
         if not self.simulate:
             try:
@@ -460,6 +472,14 @@ class MachineController:
                 # put 完成 → 機構回到 homed
                 self.action_in_progress = False
                 self.current_action_code = None
+                # 記下完成的箱號與時間，供 _confirm_put_completion 跨執行緒確認。
+                # 格式為 "been put1" / "been put2"，尾數即 bin。
+                try:
+                    n = int(low.replace("been put", "").strip() or 0)
+                    if n:
+                        self._put_done_at[n] = time.time()
+                except (ValueError, AttributeError):
+                    pass
 
             if "canceled" in low or "cancelled" in low:
                 self.action_in_progress = False
@@ -709,10 +729,57 @@ class MachineController:
         return "book is ok" in str(resp).lower()
 
     def sort_book(self, bin_number=1):
-        """分類書籍 (put1 / put2)；只認 `been put{n}` 完成訊息。"""
-        cmd = f"put{int(bin_number)}"
+        """分類書籍 (put1 / put2)；只認 `been put{n}` 完成訊息。
+
+        若 put 在 action_timeout 內回 `ack-no-completion`（ack 過但完成訊息逾時），
+        不立刻判失敗 —— 機構實測可能比 timeout 慢很多卻最終會完成。改進入
+        _confirm_put_completion 補確認；其他失敗（error state / 未 ack / busy）直接回 False。
+        """
+        n = int(bin_number)
+        cmd = f"put{n}"
+        sent_at = time.time()
         resp = self._send_command(cmd)
-        return is_completion(cmd, resp)
+        if is_completion(cmd, resp):
+            return True
+        if str(resp).strip().lower() == "ack-no-completion":
+            return self._confirm_put_completion(n, sent_at)
+        return False
+
+    def _confirm_put_completion(self, n, since):
+        """put 逾時後，在 PUT_CONFIRM_DEADLINE 內每 PUT_CONFIRM_INTERVAL 秒確認一次。
+
+        完成的權威訊號 = 觀察到 `been put{n}`（由 _apply_response_side_effects 記在
+        _put_done_at，無論被哪個 reader 讀到都算）。**不以 state==HOMED 當完成**，
+        因 homing 也會回到 state 2，書可能仍卡在機構裡 → 偽陽性。
+
+        逾時間內主動查 state 只是為了保持 serial 活動、給韌體機會推 been put；
+        真正判定仍看 _put_done_at。窗內確認到 → True，否則 → False（真‧人工介入）。
+        """
+        cmd = f"put{n}"
+        deadline = time.time() + self.PUT_CONFIRM_DEADLINE
+        self.logger.warning(
+            f"{cmd} got no completion within action_timeout; entering confirm window "
+            f"(deadline={self.PUT_CONFIRM_DEADLINE}s, interval={self.PUT_CONFIRM_INTERVAL}s)"
+        )
+        while time.time() < deadline:
+            done_at = self._put_done_at.get(n)
+            if done_at is not None and done_at >= since:
+                self.logger.warning(
+                    f"{cmd} confirmed complete (late): observed 'been put{n}' "
+                    f"{done_at - since:.1f}s after dispatch"
+                )
+                return True
+            time.sleep(self.PUT_CONFIRM_INTERVAL)
+            # 保持 serial 活動，讓韌體有機會推 been put（回應的 side-effect 會記錄）。
+            try:
+                self.get_status()
+            except Exception as e:
+                self.logger.debug(f"confirm-poll get_status failed: {e}")
+        self.logger.error(
+            f"{cmd} still unconfirmed after {self.PUT_CONFIRM_DEADLINE}s confirm window; "
+            f"manual intervention required"
+        )
+        return False
 
     def get_status(self):
         """讀 state 並同步內部旗標。"""
