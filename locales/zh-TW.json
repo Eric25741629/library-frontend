@@ -158,5 +158,10 @@
   "footer.back_to_front": "返回前台",
   "footer.logout": "登出系統",
   "lang.zh": "中文",
-  "lang.en": "English"
+  "lang.en": "English",
+  "admin.settings.front_images.en_title": "英文介面圖片（選填）",
+  "admin.settings.front_images.en_desc": "當前台切換為英文時優先顯示以下圖片；若未設定則沿用上方圖片。",
+  "admin.settings.front_images.scan_label_en": "掃描區示意圖（英文版）",
+  "admin.settings.front_images.place_label_en": "放入還書口示意圖（英文版）",
+  "admin.settings.front_images.en_empty": "未設定，英文介面將沿用中文版圖片"
 }

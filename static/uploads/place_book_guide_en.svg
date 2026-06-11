@@ -1,0 +1,214 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 560" width="960" height="560" role="img" aria-labelledby="title desc">
+  <title id="title">Book return insertion guide</title>
+  <desc id="desc">Lay the book flat and insert it upward with the spine facing the horizontal return slot.</desc>
+
+  <style>
+    text {
+      font-family: "Noto Sans TC", "Microsoft JhengHei", "PingFang TC", sans-serif;
+    }
+
+    .title {
+      font-size: 28px;
+      font-weight: 700;
+      fill: #1f2937;
+    }
+
+    .subtitle {
+      font-size: 18px;
+      fill: #4b5563;
+    }
+
+    .machine-body {
+      fill: #d1d5db;
+      stroke: #9ca3af;
+      stroke-width: 3;
+    }
+
+    .machine-front {
+      fill: #eef2f7;
+      stroke: #cbd5e1;
+      stroke-width: 1.5;
+    }
+
+    .slot-outer {
+      fill: #0f172a;
+    }
+
+    .slot-inner {
+      fill: #020617;
+    }
+
+    .slot-highlight {
+      fill: #475569;
+      opacity: 0.42;
+    }
+
+    .spine-text {
+      font-size: 18px;
+      font-weight: 700;
+      fill: white;
+      letter-spacing: 1px;
+    }
+
+    .label {
+      font-size: 20px;
+      font-weight: 700;
+      fill: #0f766e;
+    }
+
+    .small-label {
+      font-size: 16px;
+      fill: #475569;
+    }
+
+    .arrow {
+      fill: none;
+      stroke: #16a34a;
+      stroke-width: 6;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      stroke-dasharray: 12 10;
+      animation: dash 1.1s linear infinite;
+    }
+
+    .glow {
+      animation: pulse 1.4s ease-in-out infinite;
+    }
+
+    @keyframes dash {
+      to { stroke-dashoffset: -44; }
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 0.55; }
+      50% { opacity: 1; }
+    }
+  </style>
+
+  <defs>
+    <marker id="arrowhead" markerWidth="12" markerHeight="12" refX="9" refY="6" orient="auto">
+      <path d="M0,0 L12,6 L0,12 Z" fill="#16a34a"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="960" height="560" fill="#ffffff"/>
+
+  <!-- 上方說明 -->
+  <text x="480" y="42" text-anchor="middle" class="title">Insert the book with the spine facing the slot</text>
+  <text x="480" y="76" text-anchor="middle" class="subtitle">Lay the book flat with the spine (title side) toward the slot, then insert it upward</text>
+
+  <!-- 還書機底層 -->
+  <g>
+    <rect x="330" y="90" width="300" height="150" rx="24" class="machine-body"/>
+    <text x="480" y="145" text-anchor="middle" dominant-baseline="central" font-size="22" font-weight="700" fill="#374151">Book Return</text>
+  </g>
+
+  <!-- 箭頭 -->
+  <path d="M480 326 L480 252" class="arrow" marker-end="url(#arrowhead)"/>
+
+  <!-- 書本動畫 -->
+  <g id="book-motion">
+    <animateTransform
+      attributeName="transform"
+      type="translate"
+      values="0 0; 0 0; 0 -60; 0 -140; 0 -182; 0 -182; 0 0"
+      keyTimes="0; 0.12; 0.38; 0.62; 0.74; 0.84; 1"
+      dur="4.8s"
+      repeatCount="indefinite"/>
+
+    <g>
+      <animateTransform
+        attributeName="transform"
+        type="translate"
+        values="480 414; 480 414; 480 414; 480 414; 480 414; 480 414; 480 414"
+        keyTimes="0; 0.12; 0.38; 0.62; 0.74; 0.84; 1"
+        dur="4.8s"
+        repeatCount="indefinite"/>
+      <animateTransform
+        attributeName="transform"
+        additive="sum"
+        type="scale"
+        values="1 1; 1 1; 0.97 0.97; 0.9 0.9; 0.8 0.8; 0.8 0.8; 1 1"
+        keyTimes="0; 0.12; 0.38; 0.62; 0.74; 0.84; 1"
+        dur="4.8s"
+        repeatCount="indefinite"/>
+      <animateTransform
+        attributeName="transform"
+        additive="sum"
+        type="translate"
+        values="-480 -414; -480 -414; -480 -414; -480 -414; -480 -414; -480 -414; -480 -414"
+        keyTimes="0; 0.12; 0.38; 0.62; 0.74; 0.84; 1"
+        dur="4.8s"
+        repeatCount="indefinite"/>
+      <animate
+        attributeName="opacity"
+        values="1; 1; 1; 0.96; 0.7; 0; 0"
+        keyTimes="0; 0.38; 0.58; 0.72; 0.84; 0.92; 1"
+        dur="4.8s"
+        repeatCount="indefinite"/>
+
+      <!-- 陰影 -->
+      <ellipse cx="480" cy="492" rx="96" ry="11" fill="#94a3b8" opacity="0.22"/>
+
+      <!-- 書頁底部 -->
+      <rect x="390" y="468" width="180" height="18" rx="4" fill="#e5e7eb" stroke="#cbd5e1" stroke-width="1.5"/>
+      <line x1="400" y1="473" x2="560" y2="473" stroke="#cbd5e1" stroke-width="1"/>
+      <line x1="400" y1="478" x2="560" y2="478" stroke="#d1d5db" stroke-width="1"/>
+      <line x1="400" y1="483" x2="560" y2="483" stroke="#cbd5e1" stroke-width="1"/>
+
+      <!-- 封底厚度 -->
+      <rect x="384" y="348" width="192" height="126" rx="10" fill="#3730a3" opacity="0.28"/>
+
+      <!-- 書背 -->
+      <rect x="382" y="336" width="196" height="34" rx="7" fill="#1d4ed8" stroke="#1e3a8a" stroke-width="3"/>
+      <rect x="390" y="341" width="180" height="7" rx="3.5" fill="#60a5fa" opacity="0.45"/>
+      <line x1="382" y1="367" x2="578" y2="367" stroke="#1e3a8a" stroke-width="2"/>
+
+      <!-- 封面 -->
+      <rect x="382" y="366" width="196" height="126" rx="10" fill="#4f46e5" stroke="#312e81" stroke-width="3"/>
+
+      <!-- 封面高光 -->
+      <path d="M395 378 Q430 372 470 376 L470 388 Q430 384 395 390 Z" fill="#818cf8" opacity="0.28"/>
+
+      <!-- 封面內框 -->
+      <rect x="396" y="380" width="168" height="98" rx="7" fill="none" stroke="#a5b4fc" stroke-width="2" opacity="0.5"/>
+
+      <!-- 書口 -->
+      <rect x="568" y="374" width="10" height="108" rx="3" fill="#f8fafc" opacity="0.95"/>
+      <line x1="570" y1="384" x2="570" y2="474" stroke="#cbd5e1" stroke-width="1"/>
+      <line x1="573" y1="384" x2="573" y2="474" stroke="#e5e7eb" stroke-width="1"/>
+
+      <!-- 書背文字 -->
+      <text x="480" y="353" text-anchor="middle" dominant-baseline="central" class="spine-text">BOOK TITLE</text>
+
+      <!-- 書背標示（跟著書動） -->
+      <line x1="578" y1="353" x2="646" y2="353" stroke="#0f766e" stroke-width="3" stroke-linecap="round"/>
+      <text x="658" y="346" class="label">Spine</text>
+      <text x="658" y="370" class="small-label">(title side)</text>
+    </g>
+  </g>
+
+  <!-- 還書機前面板（蓋在書本上層） -->
+  <g>
+    <rect x="335" y="95" width="290" height="140" rx="20" class="machine-front"/>
+
+    <!-- 洞口深度 -->
+    <rect x="372" y="190" width="216" height="40" rx="8" class="slot-outer"/>
+    <rect x="380" y="198" width="200" height="24" rx="6" class="slot-inner"/>
+
+    <!-- 洞口高光與外框 -->
+    <rect x="378" y="196" width="204" height="6" rx="3" class="slot-highlight glow"/>
+    <rect x="372" y="190" width="216" height="40" rx="8" fill="none" stroke="#64748b" stroke-width="3"/>
+    <path d="M372 198 A 8 8 0 0 1 380 190 L580 190 A 8 8 0 0 1 588 198"
+          fill="none" stroke="#64748b" stroke-width="3"/>
+  </g>
+
+  <!-- 下方正確方向 -->
+  <g transform="translate(250,530)">
+    <circle cx="0" cy="0" r="16" fill="#16a34a"/>
+    <path d="M-8 0 L-2 6 L9 -7" fill="none" stroke="white" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="50" y="0" dominant-baseline="central" font-size="18" font-weight="700" fill="#166534">
+      Correct: lay the book flat with the spine facing the slot
+    </text>
+  </g>
+</svg>

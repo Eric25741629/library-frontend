@@ -542,6 +542,8 @@ def get_front_images():
             "images": {
                 "scan_guide": front_images.get('scan_guide', ''),
                 "place_book_guide": front_images.get('place_book_guide', ''),
+                "scan_guide_en": front_images.get('scan_guide_en', ''),
+                "place_book_guide_en": front_images.get('place_book_guide_en', ''),
             }
         })
     except Exception as e:
@@ -585,19 +587,13 @@ def upload_front_images():
             # 回傳給 config 使用 static 下的相對路徑
             return f"uploads/{safe_name}"
 
-        try:
-            new_scan_path = save_image('scan_guide', 'scan_guide')
-            if new_scan_path:
-                front_images['scan_guide'] = new_scan_path
-        except ValueError as ve:
-            return jsonify({"success": False, "message": str(ve)}), 400
-
-        try:
-            new_place_path = save_image('place_book_guide', 'place_book_guide')
-            if new_place_path:
-                front_images['place_book_guide'] = new_place_path
-        except ValueError as ve:
-            return jsonify({"success": False, "message": str(ve)}), 400
+        for field in ('scan_guide', 'place_book_guide', 'scan_guide_en', 'place_book_guide_en'):
+            try:
+                new_path = save_image(field, field)
+                if new_path:
+                    front_images[field] = new_path
+            except ValueError as ve:
+                return jsonify({"success": False, "message": str(ve)}), 400
 
         current_conf['front_images'] = front_images
         shared.CONFIG_FILE.write_text(yaml.dump(current_conf, allow_unicode=True), encoding='utf-8')

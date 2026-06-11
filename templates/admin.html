@@ -1002,6 +1002,29 @@
                         </div>
                     </div>
 
+                    <h4 style="margin:24px 0 8px; color:var(--text-primary);">{{ t('admin.settings.front_images.en_title', '英文介面圖片（選填）') }}</h4>
+                    <p style="color:var(--text-secondary); font-size:13px; margin-bottom:16px;">{{ t('admin.settings.front_images.en_desc', '當前台切換為英文時優先顯示以下圖片；若未設定則沿用上方圖片。') }}</p>
+
+                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:24px; align-items:flex-start;">
+                        <div class="form-group">
+                            <label class="form-label">{{ t('admin.settings.front_images.scan_label_en', '掃描區示意圖（英文版）') }}</label>
+                            <div style="margin-bottom:8px;">
+                                <img id="preview-scan-guide-en" src="" alt="" style="max-width:100%; max-height:180px; border-radius:8px; border:1px solid var(--border-color); object-fit:contain; display:none;">
+                                <div id="preview-scan-guide-en-empty" style="color:var(--text-secondary); font-size:12px; padding:12px; border-radius:8px; border:1px dashed var(--border-color); text-align:center;">{{ t('admin.settings.front_images.en_empty', '未設定，英文介面將沿用中文版圖片') }}</div>
+                            </div>
+                            <input type="file" id="file-scan-guide-en" class="form-input" accept="image/png,image/jpeg,image/jpg,image/gif,image/svg+xml,.svg">
+                        </div>
+
+                        <div class="form-group">
+                            <label class="form-label">{{ t('admin.settings.front_images.place_label_en', '放入還書口示意圖（英文版）') }}</label>
+                            <div style="margin-bottom:8px;">
+                                <img id="preview-place-book-en" src="" alt="" style="max-width:100%; max-height:180px; border-radius:8px; border:1px solid var(--border-color); object-fit:contain; display:none;">
+                                <div id="preview-place-book-en-empty" style="color:var(--text-secondary); font-size:12px; padding:12px; border-radius:8px; border:1px dashed var(--border-color); text-align:center;">{{ t('admin.settings.front_images.en_empty', '未設定，英文介面將沿用中文版圖片') }}</div>
+                            </div>
+                            <input type="file" id="file-place-book-en" class="form-input" accept="image/png,image/jpeg,image/jpg,image/gif,image/svg+xml,.svg">
+                        </div>
+                    </div>
+
                     <div style="margin-top: 24px; display:flex; justify-content:flex-end; gap:12px;">
                         <button class="btn btn-secondary" style="background:#e0e5f2; color:#5f6c7b;" onclick="loadFrontImagesConfig()">
                             <i class="fas fa-undo"></i> {{ t('admin.settings.front_images.reload', '重新載入目前設定') }}
@@ -1613,6 +1636,8 @@
 
                 applyPreview(scanImg, scanEmpty, scanPath);
                 applyPreview(placeImg, placeEmpty, placePath);
+                applyPreview(document.getElementById('preview-scan-guide-en'), document.getElementById('preview-scan-guide-en-empty'), images.scan_guide_en);
+                applyPreview(document.getElementById('preview-place-book-en'), document.getElementById('preview-place-book-en-empty'), images.place_book_guide_en);
             } catch (e) {
                 console.error('loadFrontImagesConfig error', e);
             }
@@ -1621,8 +1646,10 @@
         async function saveFrontImages() {
             const fileScan = document.getElementById('file-scan-guide').files[0];
             const filePlace = document.getElementById('file-place-book').files[0];
+            const fileScanEn = document.getElementById('file-scan-guide-en').files[0];
+            const filePlaceEn = document.getElementById('file-place-book-en').files[0];
 
-            if (!fileScan && !filePlace) {
+            if (!fileScan && !filePlace && !fileScanEn && !filePlaceEn) {
                 alert('請至少選擇一張要上傳的圖片');
                 return;
             }
@@ -1630,6 +1657,8 @@
             const formData = new FormData();
             if (fileScan) formData.append('scan_guide', fileScan);
             if (filePlace) formData.append('place_book_guide', filePlace);
+            if (fileScanEn) formData.append('scan_guide_en', fileScanEn);
+            if (filePlaceEn) formData.append('place_book_guide_en', filePlaceEn);
 
             showLoadingOverlay(true);
             try {

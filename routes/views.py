@@ -11,6 +11,12 @@ def index():
     scan_guide = front_images.get('scan_guide')
     place_book_guide = front_images.get('place_book_guide')
 
+    # 英文介面時優先使用英文版圖片，未設定則沿用中文版
+    lang = session.get('lang') or getattr(shared, 'DEFAULT_LANG', None) or 'zh-TW'
+    if lang == 'en':
+        scan_guide = front_images.get('scan_guide_en') or scan_guide
+        place_book_guide = front_images.get('place_book_guide_en') or place_book_guide
+
     ctx = {
         'service_suspended': shared.is_box_full(),
         'scan_guide_image': scan_guide,

@@ -158,5 +158,10 @@
   "footer.back_to_front": "Back to Front",
   "footer.logout": "Logout",
   "lang.zh": "中文",
-  "lang.en": "English"
+  "lang.en": "English",
+  "admin.settings.front_images.en_title": "English Interface Images (optional)",
+  "admin.settings.front_images.en_desc": "Shown when the front end is switched to English; falls back to the images above if not set.",
+  "admin.settings.front_images.scan_label_en": "Scan guide image (English)",
+  "admin.settings.front_images.place_label_en": "Insert guide image (English)",
+  "admin.settings.front_images.en_empty": "Not set — English UI will reuse the Chinese image"
 }

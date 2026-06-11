@@ -4,6 +4,7 @@ barcode_login_enabled: true
 book_check_enabled: true
 front_images:
   place_book_guide: uploads/place_book_guide.svg
+  place_book_guide_en: uploads/place_book_guide_en.svg
   scan_guide: uploads/scan_guide.jpg
 library:
   attachment_acceptance_enabled: true
@@ -21,6 +22,8 @@ logs:
 machine:
   baudrate: 9600
   port: /dev/uno
+  put_confirm_deadline: 60
+  put_confirm_interval: 3
 max_return_limit: 20
 require_admin_login: true
 watchdog:
