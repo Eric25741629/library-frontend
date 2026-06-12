@@ -14,8 +14,8 @@
     <div id="suspended-overlay" class="suspended-overlay"{% if service_suspended %} style="display:flex;"{% else %} style="display:none;"{% endif %}>
         <div class="suspended-content">
             <i class="fas fa-exclamation-circle"></i>
-            <h2>服務暫停</h2>
-            <p>還書箱已滿，請通知圖書館人員進行處理。</p>
+            <h2>{{ t('rb.suspended_title', '服務暫停') }}</h2>
+            <p>{{ t('rb.suspended_body', '還書箱已滿，請通知圖書館人員進行處理。') }}</p>
             <p class="sub-info">System Suspended: Return Box Full</p>
         </div>
     </div>
@@ -24,8 +24,8 @@
     <div id="loading-overlay" class="suspended-overlay" style="display:none; align-items:center; justify-content:center;">
         <div class="suspended-content">
             <div class="spinner-border"></div>
-            <h2 id="loading-title">處理中，請稍候</h2>
-            <p id="loading-message" style="margin-top:0.5rem;">請勿將手伸入還書口，以免受傷</p>
+            <h2 id="loading-title">{{ t('rb.loading_title', '處理中，請稍候') }}</h2>
+            <p id="loading-message" style="margin-top:0.5rem;">{{ t('rb.loading_safety', '請勿將手伸入還書口，以免受傷') }}</p>
         </div>
     </div>
 
@@ -65,7 +65,7 @@
             <div class="scan-area-container">
                 <div class="scan-box" id="main-scan-box">
                     {% if scan_guide_image %}
-                        <img src="{{ url_for('static', filename=scan_guide_image) }}" alt="掃描示意圖" style="max-width:100%; max-height:100%; object-fit:contain;">
+                        <img src="{{ url_for('static', filename=scan_guide_image) }}" alt="{{ t('rb.scan_img_alt', '掃描示意圖') }}" style="max-width:100%; max-height:100%; object-fit:contain;">
                         <span class="scan-guide-badge">{{ t('scan.guide_label', '示意圖') }}</span>
                     {% else %}
                         <i class="fas fa-barcode" style="font-size: 8rem; color: #d1d9e6;"></i>
@@ -107,7 +107,7 @@
 
         <!-- Step 3.6: Attachment Prompt (moved to be right after confirmation) -->
         <section id="step-attachment-prompt" class="step-section">
-            <h2 class="section-title">此書籍含有附件</h2>
+            <h2 class="section-title">{{ t('rb.attachment_title', '此書籍含有附件') }}</h2>
             <div class="place-book-instruction">
                  <div class="place-book-anim-container">
                     <div class="anim-book" style="color: #ffc107;">
@@ -115,24 +115,22 @@
                     </div>
                 </div>
                 <p style="font-size: 1.4rem; color: #555; margin-bottom: 0.5rem;">
-                    此書籍在系統中標示「含有附件」。
+                    {{ t('rb.attachment_flagged', '此書籍在系統中標示「含有附件」。') }}
                 </p>
                 <p style="font-size: 1.2rem; color: #333; margin-bottom: 1.2rem; font-weight: 500;">
-                    請選擇目前的狀況：
+                    {{ t('rb.attachment_choose', '請選擇目前的狀況：') }}
                 </p>
                 <p style="font-size: 1.05rem; color: #666; margin-bottom: 1.8rem;">
-                    若您<strong>有借附件</strong>，請選擇「我有借附件，現在一起還」，系統會先協助歸還書本本體，
-                    接著再引導您掃描附件條碼並投入附件。<br>
-                    若您<strong>沒有借附件</strong>，請選擇「我沒有借附件，現在還書」，僅歸還書本本體。
+                    {{ t('rb.attachment_help', '若您<strong>有借附件</strong>，請選擇「我有借附件，現在一起還」，系統會先協助歸還書本本體，接著再引導您掃描附件條碼並投入附件。<br>若您<strong>沒有借附件</strong>，請選擇「我沒有借附件，現在還書」，僅歸還書本本體。')|safe }}
                 </p>
             </div>
             
             <div class="action-buttons" style="flex-wrap: wrap; justify-content: center; gap: 12px;">
                 <button type="button" class="btn-primary btn-large" onclick="processBookWithAttachment(this)">
-                    <i class="fas fa-check"></i> 我有借附件，現在一起還
+                    <i class="fas fa-check"></i> {{ t('rb.btn_attachment_yes', '我有借附件，現在一起還') }}
                 </button>
                 <button type="button" class="btn-secondary btn-large" onclick="skipAttachmentFlow(this)">
-                    <i class="fas fa-book"></i> 我沒有借附件，現在還書
+                    <i class="fas fa-book"></i> {{ t('rb.btn_attachment_no', '我沒有借附件，現在還書') }}
                 </button>
                 <button type="button" class="btn-danger btn-large" onclick="resetFlow(this)">
                     <i class="fas fa-times"></i> {{ t('button.cancel_return', '取消還書') }}
@@ -142,26 +140,26 @@
 
         <!-- Step 3.5: Place Book Instruction -->
         <section id="step-place-book" class="step-section">
-            <h2 class="section-title">請將書本放入還書機內</h2>
+            <h2 class="section-title">{{ t('rb.place_title', '請將書本放入還書機內') }}</h2>
             {% if book_check_enabled %}
             <p style="text-align:center; color:#28a745; font-size:1.1rem; margin-bottom:0.5rem;">
-                <i class="fas fa-check-circle"></i> 本機已啟用書籍檢測，未放書將提醒您。
+                <i class="fas fa-check-circle"></i> {{ t('rb.book_check_on', '本機已啟用書籍檢測，未放書將提醒您。') }}
             </p>
             {% else %}
             <p style="text-align:center; color:#ffc107; font-size:1.1rem; margin-bottom:0.5rem;">
-                <i class="fas fa-bolt"></i> 目前未啟用放入檢查，系統不會確認是否已放書，請自行確認。
+                <i class="fas fa-bolt"></i> {{ t('rb.book_check_off', '目前未啟用放入檢查，系統不會確認是否已放書，請自行確認。') }}
             </p>
             {% endif %}
             
             <div class="place-book-instruction{% if place_book_guide_image %} has-guide-image{% endif %}">
                 <div class="place-book-anim-container">
                     {% if place_book_guide_image %}
-                        <img src="{{ url_for('static', filename=place_book_guide_image) }}" alt="放書示意圖" class="place-book-guide-image">
+                        <img src="{{ url_for('static', filename=place_book_guide_image) }}" alt="{{ t('rb.place_img_alt', '放書示意圖') }}" class="place-book-guide-image">
                     {% else %}
                         <!-- 原本的書背朝向機器 SVG 示意圖 -->
                         <div class="book-spine-guide">
                             <div class="guide-machine">
-                                <span class="machine-label">還書口內部</span>
+                                <span class="machine-label">{{ t('rb.machine_label', '還書口內部') }}</span>
                             </div>
                             <div class="guide-book-3d-container">
                                 <!-- SVG 平放書本示意圖 (Top-down view) -->
@@ -194,7 +192,7 @@
                                         <path d="M1,4 L1,30 L159,30 L159,4 Q159,1 156,1 L4,1 Q1,1 1,4 Z" fill="#007bff"/>
                                         
                                         <!-- 書背文字 -->
-                                        <text x="80" y="22" font-family="Noto Sans TC, sans-serif" font-size="16" font-weight="bold" fill="white" text-anchor="middle" letter-spacing="2">書背</text>
+                                        <text x="80" y="22" font-family="Noto Sans TC, sans-serif" font-size="16" font-weight="bold" fill="white" text-anchor="middle" letter-spacing="2">{{ t('rb.svg_spine', '書背') }}</text>
                                         
                                         <!-- 封面裝飾 (模擬書本質感) -->
                                         <rect x="20" y="50" width="120" height="10" rx="2" fill="#f1f3f5"/>
@@ -207,7 +205,7 @@
                                 </svg>
                             </div>
                             <div class="guide-user">
-                                <span class="user-label">您的位置</span>
+                                <span class="user-label">{{ t('rb.user_label', '您的位置') }}</span>
                             </div>
                         </div>
                     {% endif %}
@@ -216,7 +214,7 @@
 
             <div class="action-buttons">
                 <button type="button" class="btn-primary btn-large btn-pulse" onclick="finalizeReturn(this)">
-                    <i class="fas fa-check"></i> 完成投入
+                    <i class="fas fa-check"></i> {{ t('rb.btn_finish_insert', '完成投入') }}
                 </button>
                 <button type="button" class="btn-danger btn-large" onclick="openCancelConfirmModal(this)" style="margin-left:12px;">
                     <i class="fas fa-times"></i> {{ t('button.cancel_return', '取消還書') }}
@@ -228,7 +226,7 @@
 
         <!-- Step 3.65: Scan Attachment -->
         <section id="step-scan-attachment" class="step-section">
-            <h2 class="section-title">請掃描附件上的條碼</h2>
+            <h2 class="section-title">{{ t('rb.scan_attach_title', '請掃描附件上的條碼') }}</h2>
             
             <div class="scan-area-container">
                 <div class="scan-box" style="border-color: #ffc107;" id="attachment-scan-box">
@@ -236,14 +234,14 @@
                 </div>
             </div>
             
-            <p class="scan-status" id="scan-attachment-status-text">請掃描附件上的條碼進行核對</p>
+            <p class="scan-status" id="scan-attachment-status-text">{{ t('rb.scan_attach_status', '請掃描附件上的條碼進行核對') }}</p>
 
-            <input type="text" id="attachment-barcode-input" class="barcode-input-field" placeholder="掃描附件條碼..." autocomplete="off" readonly>
+            <input type="text" id="attachment-barcode-input" class="barcode-input-field" placeholder="{{ t('rb.scan_attach_placeholder', '掃描附件條碼...') }}" autocomplete="off" readonly>
         </section>
 
         <!-- Step 3.7: Insert Attachment Instruction -->
         <section id="step-insert-attachment" class="step-section">
-             <h2 class="section-title">請投入附件</h2>
+             <h2 class="section-title">{{ t('rb.insert_attach_title', '請投入附件') }}</h2>
              <div class="place-book-instruction">
                 <div class="place-book-anim-container">
                     <div class="anim-book">
@@ -257,13 +255,13 @@
                     </div>
                 </div>
                 <p style="font-size: 1.5rem; color: #555; margin-bottom: 1rem;">
-                    請將附件投入還書口
+                    {{ t('rb.insert_attach_body', '請將附件投入還書口') }}
                 </p>
             </div>
 
             <div class="action-buttons">
                 <button class="btn-primary btn-large btn-pulse" onclick="finalizeAttachmentReturn(this)">
-                    <i class="fas fa-check"></i> 完成附件投入
+                    <i class="fas fa-check"></i> {{ t('rb.btn_finish_attach', '完成附件投入') }}
                 </button>
             </div>
         </section>
@@ -274,13 +272,13 @@
                 <div class="success-icon">
                     <i class="fas fa-check"></i>
                 </div>
-                <h2 class="success-title">還書成功！</h2>
-                <p class="success-subtitle">感謝您的使用。</p>
+                <h2 class="success-title">{{ t('rb.success_title', '還書成功！') }}</h2>
+                <p class="success-subtitle">{{ t('rb.success_thanks', '感謝您的使用。') }}</p>
                 
-                <p style="color: #888; margin-bottom: 1.5rem;">將在 <span id="countdown-sec" style="color: var(--primary-blue); font-weight: bold;">5</span> 秒後自動返回首頁</p>
+                <p style="color: #888; margin-bottom: 1.5rem;">{{ t('rb.countdown_pre', '將在') }} <span id="countdown-sec" style="color: var(--primary-blue); font-weight: bold;">5</span> {{ t('rb.countdown_post', '秒後自動返回首頁') }}</p>
 
                 <button class="btn-primary btn-medium" onclick="resetFlow(this)">
-                    <i class="fas fa-home"></i> 返回首頁
+                    <i class="fas fa-home"></i> {{ t('rb.btn_home', '返回首頁') }}
                 </button>
             </div>
         </section>
@@ -306,8 +304,8 @@
     <!-- 臨時訊息彈窗（用於顯示條碼錯誤等重要提示） -->
     <div id="temp-message-modal" class="suspended-overlay" style="display:none; align-items:center; justify-content:center; z-index:10002;">
         <div class="suspended-content" style="max-width:760px; padding: 1.6rem; border-radius:12px; text-align:center; background:rgba(255,255,255,0.98); color:var(--text-dark);">
-            <h2 id="temp-message-title" style="color:var(--danger-red); margin-bottom:0.25rem;"><i class="fas fa-exclamation-circle"></i> 錯誤</h2>
-            <p id="temp-message-body" style="font-size:1.05rem; color:#333; margin-bottom:0.25rem;">發生錯誤</p>
+            <h2 id="temp-message-title" style="color:var(--danger-red); margin-bottom:0.25rem;"><i class="fas fa-exclamation-circle"></i> {{ t('rb.error_title', '錯誤') }}</h2>
+            <p id="temp-message-body" style="font-size:1.05rem; color:#333; margin-bottom:0.25rem;">{{ t('rb.error_body', '發生錯誤') }}</p>
         </div>
     </div>
 
@@ -335,18 +333,18 @@
     <!-- Footer -->
     <footer class="main-footer">
         <div class="footer-left">
-            &copy; 2025 國立雲林科技大學圖書館 | 版權所有
+            &copy; 2025 {{ t('rb.footer_copyright', '國立雲林科技大學圖書館 | 版權所有') }}
         </div>
         <div class="footer-right">
             <a href="/admin" style="color: #999; text-decoration: none; margin-right: 15px; font-size: 0.8rem;"><i class="fas fa-cog"></i> {{ t('footer.admin', '管理後台') }}</a>
             <span class="system-status" id="system-status">
                 <span id="lib-status" style="margin-right:12px;">
                     <span class="status-dot" id="lib-dot" style="background-color:#ffcc00"></span>
-                    圖書館: <span id="lib-text">檢查中</span>
+                    {{ t('rb.footer_library', '圖書館') }}: <span id="lib-text">{{ t('rb.status_checking', '檢查中') }}</span>
                 </span>
                 <span id="machine-status">
                     <span class="status-dot" id="machine-dot" style="background-color:#ffcc00"></span>
-                    機器: <span id="machine-text">檢查中</span>
+                    {{ t('rb.footer_machine', '機器') }}: <span id="machine-text">{{ t('rb.status_checking', '檢查中') }}</span>
                 </span>
             </span>
         </div>
@@ -360,8 +358,85 @@
     <script>
         // i18n strings exposed to client-side JS
         window.I18N = {
-            confirm_title: "{{ t('confirm.title', '請確認以下還書資訊：') }}",
-            confirm_next: "{{ t('confirm.next_to_place', '下一步：投入還書箱') }}"
+            confirm_title: {{ t('confirm.title', '請確認以下還書資訊：')|tojson }},
+            confirm_next: {{ t('confirm.next_to_place', '下一步：投入還書箱')|tojson }},
+            residual_title: {{ t('rb.js.residual_title', '偵測到投書口殘留書籍')|tojson }},
+            residual_body: {{ t('rb.js.residual_body', '上次還書流程未正常結束，投書口內仍有書本。請聯絡管理員取出並重置機器。')|tojson }},
+            abnormal_title: {{ t('rb.js.abnormal_title', '機器狀態異常')|tojson }},
+            abnormal_body_noflow: {{ t('rb.js.abnormal_body_noflow', '機器目前無法進入還書流程，請聯絡管理員。')|tojson }},
+            abnormal_body_paused: {{ t('rb.js.abnormal_body_paused', '暫停還書服務，請聯絡管理員處理。')|tojson }},
+            state_label: {{ t('rb.js.state_label', '狀態：')|tojson }},
+            reason_label: {{ t('rb.js.reason_label', '原因：')|tojson }},
+            error_title: {{ t('rb.error_title', '錯誤')|tojson }},
+            overdue_title: {{ t('rb.js.overdue_title', '逾期提醒')|tojson }},
+            machine_error_title: {{ t('rb.js.machine_error_title', '機器錯誤')|tojson }},
+            library_notice_title: {{ t('rb.js.library_notice_title', '館方提醒')|tojson }},
+            return_failed: {{ t('rb.js.return_failed', '還書失敗')|tojson }},
+            already_returned: {{ t('rb.js.already_returned', '本書系統紀錄已歸還，請取回書本後洽櫃台確認。')|tojson }},
+            library_reject: {{ t('rb.js.library_reject', '圖書館系統拒絕本次還書，請取回書本並洽詢櫃台。')|tojson }},
+            machine_error_desk: {{ t('rb.js.machine_error_desk', '機器發生錯誤，請洽櫃台處理。')|tojson }},
+            slot_not_open: {{ t('rb.js.slot_not_open', '投書口未開啟，請重新開始還書流程。')|tojson }},
+            close_failed: {{ t('rb.js.close_failed', '投書口關閉失敗，已重新開啟，請取回書本並洽櫃台。')|tojson }},
+            state_unreadable: {{ t('rb.js.state_unreadable', '無法讀取機器狀態，請洽櫃台。')|tojson }},
+            library_offline: {{ t('rb.js.library_offline', '圖書館系統暫時無法連線，請稍後再試或洽櫃台。')|tojson }},
+            checking_conn: {{ t('rb.js.checking_conn', '檢查圖書館連線中...')|tojson }},
+            conn_failed_alert: {{ t('rb.js.conn_failed_alert', '無法連線至圖書館伺服器，暫無法提供還書服務。\n請通知櫃台人員或稍後再試。')|tojson }},
+            system_check_failed: {{ t('rb.js.system_check_failed', '系統檢查失敗，請稍後再試。')|tojson }},
+            safety_default: {{ t('rb.js.safety_default', '請不要將手放在開門的地方')|tojson }},
+            kw_open: {{ t('rb.js.kw_open', '開門')|tojson }},
+            kw_close: {{ t('rb.js.kw_close', '關門')|tojson }},
+            title_opening: {{ t('rb.js.title_opening', '開門中，請稍後')|tojson }},
+            title_closing: {{ t('rb.js.title_closing', '關門中，請稍後')|tojson }},
+            title_processing: {{ t('rb.js.title_processing', '處理中，請稍後')|tojson }},
+            stage_pre_check: {{ t('rb.js.stage_pre_check', '正在準備')|tojson }},
+            please_wait: {{ t('rb.js.please_wait', '請稍候')|tojson }},
+            stage_closing: {{ t('rb.js.stage_closing', '投書口關閉中')|tojson }},
+            stage_closing_msg: {{ t('rb.js.stage_closing_msg', '請勿打開投書口')|tojson }},
+            stage_closed: {{ t('rb.js.stage_closed', '檢查書籍是否放妥')|tojson }},
+            stage_checkin: {{ t('rb.js.stage_checkin', '連線圖書館系統')|tojson }},
+            stage_checkin_msg: {{ t('rb.js.stage_checkin_msg', '正在送出還書資料')|tojson }},
+            stage_sorting: {{ t('rb.js.stage_sorting', '重新上磁並送入分類箱')|tojson }},
+            stage_sorting_msg: {{ t('rb.js.stage_sorting_msg', '即將完成歸還')|tojson }},
+            stage_done: {{ t('rb.js.stage_done', '歸還完成')|tojson }},
+            stage_error: {{ t('rb.js.stage_error', '處理中')|tojson }},
+            machine_starting: {{ t('rb.js.machine_starting', '機器啟動中 請稍後')|tojson }},
+            homing_failed_admin: {{ t('rb.js.homing_failed_admin', '機器回原點失敗，請通知管理員。')|tojson }},
+            one_book_only: {{ t('rb.js.one_book_only', '一次只能歸還一本書')|tojson }},
+            querying: {{ t('rb.js.querying', '查詢書籍資料中...')|tojson }},
+            query_failed: {{ t('rb.js.query_failed', '圖書館伺服器查詢失敗，請再試一次')|tojson }},
+            attach_not_supported: {{ t('rb.js.attach_not_supported', '本機暫不處理含附件之書籍，請至櫃台辦理。')|tojson }},
+            attach_not_supported_short: {{ t('rb.js.attach_not_supported_short', '本機不處理含附件之書籍')|tojson }},
+            barcode_error: {{ t('rb.js.barcode_error', '書籍條碼錯誤')|tojson }},
+            scan_failed: {{ t('rb.js.scan_failed', '掃描失敗')|tojson }},
+            scan_ready: {{ t('scan.ready', '系統就緒，請掃描書籍條碼')|tojson }},
+            system_error_retry: {{ t('rb.js.system_error_retry', '系統錯誤，請稍後再試')|tojson }},
+            wake_failed_retry: {{ t('rb.js.wake_failed_retry', '喚醒或回原點失敗，請稍候再試')|tojson }},
+            opening_door: {{ t('rb.js.opening_door', '開門中，請稍候…')|tojson }},
+            opening_door_book: {{ t('rb.js.opening_door_book', '開門中（書籍），請稍候…')|tojson }},
+            open_failed: {{ t('rb.js.open_failed', '開門失敗')|tojson }},
+            system_error: {{ t('rb.js.system_error', '系統錯誤')|tojson }},
+            confirm_cancel: {{ t('rb.js.confirm_cancel', '請確認書籍未放入還書箱。確定要取消嗎？')|tojson }},
+            canceling: {{ t('rb.js.canceling', '投書口關閉中，機器歸位中…請稍候')|tojson }},
+            cancel_send_failed: {{ t('rb.js.cancel_send_failed', '取消指令發送失敗，請聯絡管理員確認機器狀態。')|tojson }},
+            homing_slow: {{ t('rb.js.homing_slow', '機器歸位時間較長，若再次嘗試還書仍異常，請洽櫃台。')|tojson }},
+            cancel_error: {{ t('rb.js.cancel_error', '取消還書時發生錯誤')|tojson }},
+            slot_reopened_suffix: {{ t('rb.js.slot_reopened_suffix', '(投書口已重新開啟，請重新放入)')|tojson }},
+            wake_before_open_book: {{ t('rb.js.wake_before_open_book', '喚醒並回原點中，稍候再開啟投書口 (書籍)…')|tojson }},
+            btn_book_inserted_next: {{ t('rb.js.btn_book_inserted_next', '完成書籍投入，下一步')|tojson }},
+            book_return_failed: {{ t('rb.js.book_return_failed', '書籍歸還失敗')|tojson }},
+            attach_verify_ok: {{ t('rb.js.attach_verify_ok', '條碼核對成功！準備開啟投書口...')|tojson }},
+            attach_verify_fail: {{ t('rb.js.attach_verify_fail', '條碼不符！請掃描正確的附件條碼')|tojson }},
+            attach_scan_status: {{ t('rb.scan_attach_status', '請掃描附件上的條碼進行核對')|tojson }},
+            wake_before_open_attach: {{ t('rb.js.wake_before_open_attach', '喚醒並回原點中，稍候再開啟投書口 (附件)…')|tojson }},
+            open_slot_failed: {{ t('rb.js.open_slot_failed', '開啟投書口失敗')|tojson }},
+            attach_slot_failed: {{ t('rb.js.attach_slot_failed', '無法開啟投書口接收附件，請洽櫃台')|tojson }},
+            attach_scan_first: {{ t('rb.js.attach_scan_first', '尚未掃描附件條碼，請先掃描以便核對')|tojson }},
+            attach_error_book_ok: {{ t('rb.js.attach_error_book_ok', '附件處理異常，但書籍已歸還。')|tojson }},
+            lib_ok: {{ t('rb.js.lib_ok', '可用')|tojson }},
+            lib_fail: {{ t('rb.js.lib_fail', '連線失敗')|tojson }},
+            mach_ready: {{ t('rb.js.mach_ready', '就緒')|tojson }},
+            mach_off: {{ t('rb.js.mach_off', '離線')|tojson }},
+            date_locale: {{ t('rb.js.date_locale', 'zh-TW')|tojson }}
         };
         let scannedBooks = [];
         let isScanning = false; // 掃描鎖定旗標，防止快速重複輸入
@@ -409,7 +484,7 @@
         // 更新時間
         function updateTime() {
             const now = new Date();
-            const dateStr = now.toLocaleDateString('zh-TW', { year: 'numeric', month: 'long', day: 'numeric' });
+            const dateStr = now.toLocaleDateString(I18N.date_locale, { year: 'numeric', month: 'long', day: 'numeric' });
             const timeStr = now.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' });
             document.getElementById('current-time').textContent = `${timeStr} | ${dateStr}`;
         }
@@ -458,20 +533,20 @@
             const detailEl = document.getElementById('homepage-warning-detail');
             if (titleEl && bodyEl) {
                 if (result && result.reason === 'book_in_chute') {
-                    titleEl.textContent = '偵測到投書口殘留書籍';
-                    bodyEl.textContent = '上次還書流程未正常結束，投書口內仍有書本。請聯絡管理員取出並重置機器。';
+                    titleEl.textContent = I18N.residual_title;
+                    bodyEl.textContent = I18N.residual_body;
                 } else if (result && result.reason === 'abnormal_state') {
-                    titleEl.textContent = '機器狀態異常';
-                    bodyEl.textContent = '機器目前無法進入還書流程，請聯絡管理員。';
+                    titleEl.textContent = I18N.abnormal_title;
+                    bodyEl.textContent = I18N.abnormal_body_noflow;
                 } else {
-                    titleEl.textContent = '機器狀態異常';
-                    bodyEl.textContent = '暫停還書服務，請聯絡管理員處理。';
+                    titleEl.textContent = I18N.abnormal_title;
+                    bodyEl.textContent = I18N.abnormal_body_paused;
                 }
             }
             if (detailEl) {
                 const parts = [];
-                if (result && result.machine_state) parts.push('狀態：' + result.machine_state);
-                if (result && result.reason) parts.push('原因：' + result.reason);
+                if (result && result.machine_state) parts.push(I18N.state_label + result.machine_state);
+                if (result && result.reason) parts.push(I18N.reason_label + result.reason);
                 detailEl.textContent = parts.join('  /  ');
             }
             const modal = document.getElementById('homepage-warning-modal');
@@ -529,7 +604,7 @@
                     return;
                 }
                 if (title) {
-                    title.innerHTML = '<i class="fas fa-exclamation-circle"></i> 錯誤';
+                    title.innerHTML = '<i class="fas fa-exclamation-circle"></i> ' + I18N.error_title;
                     title.style.color = 'var(--danger-red)';
                 }
                 body.textContent = message;
@@ -564,13 +639,13 @@
 
                 if (title) {
                     if (noticeType === 'overdue') {
-                        title.innerHTML = '<i class="fas fa-exclamation-circle"></i> 逾期提醒';
+                        title.innerHTML = '<i class="fas fa-exclamation-circle"></i> ' + I18N.overdue_title;
                         title.style.color = '#e67e22';
                     } else if (noticeType === 'error') {
-                        title.innerHTML = '<i class="fas fa-times-circle"></i> 機器錯誤';
+                        title.innerHTML = '<i class="fas fa-times-circle"></i> ' + I18N.machine_error_title;
                         title.style.color = '#dc3545';
                     } else {
-                        title.innerHTML = '<i class="fas fa-info-circle"></i> 館方提醒';
+                        title.innerHTML = '<i class="fas fa-info-circle"></i> ' + I18N.library_notice_title;
                         title.style.color = '#2980b9';
                     }
                 }
@@ -609,13 +684,13 @@
         // returnToWelcome: 一個 callback，模態關閉後要回到歡迎頁時呼叫（通常是 resetFlow / nextStep('step-welcome')）。
         function handleReturnFailureCode(result, returnToWelcome) {
             if (!result || !result.code) return false;
-            const msg = result.message || '還書失敗';
+            const msg = result.message || I18N.return_failed;
             const back = (typeof returnToWelcome === 'function') ? returnToWelcome : () => nextStep('step-welcome');
             switch (result.code) {
                 case 'LIBRARY_REJECT_ALREADY_RETURNED':
                     // 書已歸還：後端已重開門，10 秒禮貌 modal 後回歡迎頁
                     showOverdueMessage(
-                        msg || '本書系統紀錄已歸還，請取回書本後洽櫃台確認。',
+                        msg || I18N.already_returned,
                         10,
                         back,
                         'notice'
@@ -624,7 +699,7 @@
                 case 'LIBRARY_REJECT_OTHER':
                     // 其他圖書館拒絕：後端已重開門，10 秒禮貌 modal 後回歡迎頁
                     showOverdueMessage(
-                        msg || '圖書館系統拒絕本次還書，請取回書本並洽詢櫃台。',
+                        msg || I18N.library_reject,
                         10,
                         back,
                         'notice'
@@ -633,7 +708,7 @@
                 case 'MACHINE_ERROR_STATE_0':
                     // 機器卡住：sticky modal，不自動回首頁，等櫃台處理
                     showOverdueMessage(
-                        msg || '機器發生錯誤，請洽櫃台處理。',
+                        msg || I18N.machine_error_desk,
                         0,  // sticky
                         null,
                         'error'
@@ -643,7 +718,7 @@
                     // state≠3：投書口未開（流程錯位）。後端不會自動修復，
                     // 讓使用者回歡迎頁重新開始，下一輪會走 wake_and_home + open。
                     showOverdueMessage(
-                        msg || '投書口未開啟，請重新開始還書流程。',
+                        msg || I18N.slot_not_open,
                         8,
                         back,
                         'notice'
@@ -652,7 +727,7 @@
                 case 'MACHINE_CLOSE_FAILED':
                     // 投書口關閉失敗：後端已重新開門，使用者取回書本後回首頁
                     showOverdueMessage(
-                        msg || '投書口關閉失敗，已重新開啟，請取回書本並洽櫃台。',
+                        msg || I18N.close_failed,
                         10,
                         back,
                         'error'
@@ -661,7 +736,7 @@
                 case 'MACHINE_STATUS_UNKNOWN':
                     // 機器狀態讀不到：sticky，櫃台介入
                     showOverdueMessage(
-                        msg || '無法讀取機器狀態，請洽櫃台。',
+                        msg || I18N.state_unreadable,
                         0,
                         null,
                         'error'
@@ -670,7 +745,7 @@
                 case 'SIP2_DISCONNECTED':
                     // 圖書館連線異常：後端已重開門，10 秒禮貌 modal 後回歡迎頁
                     showOverdueMessage(
-                        msg || '圖書館系統暫時無法連線，請稍後再試或洽櫃台。',
+                        msg || I18N.library_offline,
                         10,
                         back,
                         'notice'
@@ -684,7 +759,7 @@
         // 流程控制
         async function startReturnProcess() {
             // 點擊開始還書時，先檢查圖書館連線
-            showLoading('檢查圖書館連線中...');
+            showLoading(I18N.checking_conn);
             try {
                 const res = await fetch('/api/status');
                 const data = await res.json();
@@ -692,7 +767,7 @@
 
                 if (!data.library_ok) {
                     // 若連線失敗，提示使用者並阻止進入下一步
-                    alert('無法連線至圖書館伺服器，暫無法提供還書服務。\n請通知櫃台人員或稍後再試。');
+                    alert(I18N.conn_failed_alert);
                     return;
                 }
                 
@@ -700,7 +775,7 @@
                 nextStep('step-scan');
             } catch (e) {
                 hideLoading();
-                alert('系統檢查失敗，請稍後再試。');
+                alert(I18N.system_check_failed);
                 console.error(e);
             }
         }
@@ -741,17 +816,17 @@
             const title = document.getElementById('loading-title');
             
             // 若有自訂訊息則顯示，否則顯示預設的安全警語
-            const text = message || '請不要將手放在開門的地方';
+            const text = message || I18N.safety_default;
             if (msg) msg.textContent = text;
             
             // 根據訊息內容自動調整標題
             if (title) {
-                if (text.includes('開門')) {
-                    title.textContent = '開門中，請稍後';
-                } else if (text.includes('關門')) {
-                    title.textContent = '關門中，請稍後';
+                if (text.includes(I18N.kw_open)) {
+                    title.textContent = I18N.title_opening;
+                } else if (text.includes(I18N.kw_close)) {
+                    title.textContent = I18N.title_closing;
                 } else {
-                    title.textContent = '處理中，請稍後';
+                    title.textContent = I18N.title_processing;
                 }
             }
             
@@ -778,13 +853,13 @@
         //   error      → 失敗（停止輪詢）
         let _returnProgressTimer = null;
         const _stageDisplay = {
-            pre_check: { title: '正在準備', msg: '請稍候' },
-            closing:   { title: '投書口關閉中', msg: '請勿打開投書口' },
-            closed:    { title: '檢查書籍是否放妥', msg: '請稍候' },
-            checkin:   { title: '連線圖書館系統', msg: '正在送出還書資料' },
-            sorting:   { title: '重新上磁並送入分類箱', msg: '即將完成歸還' },
-            done:      { title: '歸還完成', msg: '' },
-            error:     { title: '處理中', msg: '請稍候' },
+            pre_check: { title: I18N.stage_pre_check, msg: I18N.please_wait },
+            closing:   { title: I18N.stage_closing, msg: I18N.stage_closing_msg },
+            closed:    { title: I18N.stage_closed, msg: I18N.please_wait },
+            checkin:   { title: I18N.stage_checkin, msg: I18N.stage_checkin_msg },
+            sorting:   { title: I18N.stage_sorting, msg: I18N.stage_sorting_msg },
+            done:      { title: I18N.stage_done, msg: '' },
+            error:     { title: I18N.stage_error, msg: I18N.please_wait },
         };
 
         function stopReturnStageRotator() {
@@ -801,7 +876,7 @@
             if (!entry) return;
             let titleText = entry.title;
             if (stage === 'sorting' && targetBin) {
-                titleText = `重新上磁並送入分類箱 ${targetBin}`;
+                titleText = `${I18N.stage_sorting} ${targetBin}`;
             }
             if (title) title.textContent = titleText;
             if (msg)   msg.textContent   = entry.msg || (detail || '');
@@ -843,14 +918,14 @@
             // 若有按鈕來源，避免重複點擊
             if (btn) btn.disabled = true;
             // 嘗試喚醒並回原點，確保機器回到標準狀態，避免殘留 state4
-            showLoading('機器啟動中 請稍後');
+            showLoading(I18N.machine_starting);
             try {
                 // 確認是否需要喚醒並回原點
                 const wakeResult = await ensureAwakeAndHomedIfNeeded();
                 if (wakeResult.error) {
                     const j = wakeResult.resp || {};
                     console.warn('wake_and_home failed', j);
-                    alert((j && j.message) || '機器回原點失敗，請通知管理員。');
+                    alert((j && j.message) || I18N.homing_failed_admin);
                 } else if (wakeResult.skipped) {
                     // 已就緒、跳過 wake_and_home
                     checkSystemStatus();
@@ -887,7 +962,7 @@
 
             // 嚴格限制：一次只能還一本書
             if (scannedBooks.length >= 1) {
-                statusText.textContent = '一次只能歸還一本書';
+                statusText.textContent = I18N.one_book_only;
                 statusText.style.color = 'orange';
                 // 不自動重置為就緒，保持提示狀態直到使用者操作下一步或重置
                 return;
@@ -902,7 +977,7 @@
             // statusText.style.color = 'var(--primary-blue)';
 
             // 顯示查詢中：沿用 loading overlay 風格
-            showLoading('查詢書籍資料中...');
+            showLoading(I18N.querying);
             try {
                 const response = await fetch('/api/scan', {
                     method: 'POST',
@@ -912,7 +987,7 @@
 
                 // 若伺服器發生錯誤（例如無法連線圖書館系統），直接拒絕本次還書流程
                 if (response.status >= 500) {
-                    statusText.textContent = '圖書館伺服器查詢失敗，請再試一次';
+                    statusText.textContent = I18N.query_failed;
                     statusText.style.color = 'red';
                     document.getElementById('main-scan-box').classList.remove('active');
                     // 稍候自動返回首頁
@@ -933,7 +1008,7 @@
                         : !!result.data.has_attachment;
                     // 目前暫不受理含附件（已借出）的書籍：直接提示並重置
                     if (hasBorrowedAttachment) {
-                        showTempMessage('本機暫不處理含附件之書籍，請至櫃台辦理。', 3);
+                        showTempMessage(I18N.attach_not_supported, 3);
                         document.getElementById('main-scan-box').classList.remove('active');
                         setTimeout(() => {
                             resetFlow();
@@ -946,7 +1021,7 @@
                 } else {
                     // 不接受含附件的書（附件已借出）
                     if (result.code === 'ATTACHMENT_NOT_ACCEPTED') {
-                        const msg = result.message || '本機不處理含附件之書籍';
+                        const msg = result.message || I18N.attach_not_supported_short;
                         showTempMessage(msg, 3);
                         document.getElementById('main-scan-box').classList.remove('active');
                         setTimeout(() => {
@@ -959,7 +1034,7 @@
                     // 目前已不再檢查或顯示逾期狀態
 
                     // 若是書籍條碼錯誤，改用彈窗顯示並保持 5 秒，再回到首頁
-                    const msg = result.message || '書籍條碼錯誤';
+                    const msg = result.message || I18N.barcode_error;
                     const isBarcodeErr = result.code === 'BARCODE_ERROR' || (msg && /條碼/.test(msg));
                     if (isBarcodeErr) {
                         // 顯示彈窗 3 秒
@@ -970,11 +1045,11 @@
                         }, 5000);
                         // 不做紅色閃爍處理
                     } else {
-                        statusText.textContent = result.message || '掃描失敗';
+                        statusText.textContent = result.message || I18N.scan_failed;
                         statusText.style.color = 'red';
                         // 3秒後重置狀態
                         setTimeout(() => {
-                            statusText.textContent = '系統就緒，請掃描書籍條碼';
+                            statusText.textContent = I18N.scan_ready;
                             statusText.style.color = 'var(--text-light)';
                         }, 3000);
                         document.getElementById('main-scan-box').classList.remove('active');
@@ -982,7 +1057,7 @@
                 }
             } catch (e) {
                 console.error(e);
-                statusText.textContent = '系統錯誤，請稍後再試';
+                statusText.textContent = I18N.system_error_retry;
                 statusText.style.color = 'red';
             } finally {
                 hideLoading();
@@ -1110,18 +1185,18 @@
             currentProcessingBook = null;
             if (btn) btn.disabled = true;
             // 先喚醒並執行 homing，再執行 open，避免因 state4 導致 open 失敗
-            showLoading('機器啟動中 請稍等');
+            showLoading(I18N.machine_starting);
             try {
                 const wakeRes = await fetch('/api/hardware/wake_and_home', { method: 'POST' });
                 const wakeJson = await wakeRes.json().catch(()=>({}));
                 if (!wakeRes.ok || !wakeJson.success) {
                     hideLoading();
-                    alert(wakeJson.message || '喚醒或回原點失敗，請稍候再試');
+                    alert(wakeJson.message || I18N.wake_failed_retry);
                     return;
                 }
     
                 // 喚醒並回原點成功，接著開門
-                showLoading('開門中，請稍候…', '開門中，請稍候');
+                showLoading(I18N.opening_door);
                 const res = await fetch('/api/hardware/open', { method: 'POST' });
                 const result = await res.json();
                 if (res.ok && result.success) {
@@ -1129,12 +1204,12 @@
                     nextStep('step-place-book');
                 } else {
                     hideLoading();
-                    alert(result.message || '開門失敗');
+                    alert(result.message || I18N.open_failed);
                 }
             } catch (e) {
                 hideLoading();
                 console.error(e);
-                alert('系統錯誤，請稍後再試');
+                alert(I18N.system_error_retry);
             } finally {
                 if (btn) setTimeout(() => { try { btn.disabled = false } catch(e){} }, 500);
             }
@@ -1144,7 +1219,7 @@
         function setConfirmNextButtonLabel() {
             const btn = document.getElementById('confirm-next-btn');
             if (!btn) return;
-            const text = (window.I18N && window.I18N.confirm_next) ? window.I18N.confirm_next : '下一步：投入還書箱';
+            const text = (window.I18N && window.I18N.confirm_next) ? window.I18N.confirm_next : I18N.confirm_next;
             btn.innerHTML = '<i class="fas fa-arrow-right"></i> ' + text;
         }
 
@@ -1171,7 +1246,7 @@
             if (!modal) {
                 console.error('Modal #cancel-confirm-modal not found!');
                 // Fallback if modal missing: directly cancel
-                if(confirm('請確認書籍未放入還書箱。確定要取消嗎？')) {
+                if(confirm(I18N.confirm_cancel)) {
                     cancelReturn(btn);
                 }
                 return;
@@ -1216,7 +1291,7 @@
         // 取消還書：發送 cancel 指令後，等機器物理歸位完成才解鎖回首頁
         async function cancelReturn(btn) {
             if (btn) btn.disabled = true;
-            showLoading('投書口關閉中，機器歸位中…請稍候');
+            showLoading(I18N.canceling);
             try {
                 // 1. 發送 cancel
                 try {
@@ -1228,7 +1303,7 @@
                     console.log('Cancel API successful:', cancelJson);
                 } catch (e) {
                     console.warn('cancel API failed', e);
-                    alert('取消指令發送失敗，請聯絡管理員確認機器狀態。');
+                    alert(I18N.cancel_send_failed);
                 }
 
                 // 2. 清掉自動倒數與已掃描列表（這不會送任何指令給後端，所以可以早做）
@@ -1244,13 +1319,13 @@
                 if (!homed) {
                     console.warn('cancelReturn: homed wait timed out');
                     // 不阻擋使用者，但提示一下。下次互動時 ensureAwake / watchdog 會處理。
-                    alert('機器歸位時間較長，若再次嘗試還書仍異常，請洽櫃台。');
+                    alert(I18N.homing_slow);
                 }
 
                 nextStep('step-welcome');
             } catch (e) {
                 console.error('cancelReturn error', e);
-                alert('取消還書時發生錯誤');
+                alert(I18N.cancel_error);
                 nextStep('step-welcome');
             } finally {
                 hideLoading();
@@ -1308,7 +1383,7 @@
                     hideLoading();
                     // 如果是書籍未放入的錯誤，後端已重開門，前端需提示使用者
                     if (result.code === 'BOOK_NOT_DETECTED') {
-                        alert(result.message + "\n\n(投書口已重新開啟，請重新放入)");
+                        alert(result.message + "\n\n" + I18N.slot_reopened_suffix);
                         // 停留在原步驟，不跳轉，讓使用者可以再次點擊「完成投入」
                     } else if (handleReturnFailureCode(result, () => {
                         // 模態關閉後：清空本地暫存並回到歡迎頁；後端已重開門讓使用者取回書本
@@ -1319,13 +1394,13 @@
                     })) {
                         // 已由 handleReturnFailureCode 接手顯示，不再彈出 alert
                     } else {
-                        alert(result.message || '還書失敗');
+                        alert(result.message || I18N.return_failed);
                     }
                 }
             } catch (e) {
                 hideLoading();
                 console.error(e);
-                alert('系統錯誤');
+                alert(I18N.system_error);
             } finally {
                 if (btn) setTimeout(() => { try { btn.disabled = false } catch(e){} }, 500);
             }
@@ -1350,18 +1425,18 @@
         async function processBookWithAttachment(btn) {
             if (btn) btn.disabled = true;
             // 先確保機器已喚醒並回原點，避免 state4 卡住
-            showLoading('喚醒並回原點中，稍候再開啟投書口 (書籍)…');
+            showLoading(I18N.wake_before_open_book);
             try {
                const wakeRes = await fetch('/api/hardware/wake_and_home', { method: 'POST' });
                const wakeJson = await wakeRes.json().catch(()=>({}));
                if (!wakeRes.ok || !wakeJson.success) {
                    hideLoading();
-                   alert(wakeJson.message || '喚醒或回原點失敗，請稍候再試');
+                   alert(wakeJson.message || I18N.wake_failed_retry);
                    return;
                }
    
                // 喚醒並回原點成功，開門讓使用者放書
-               showLoading('開門中（書籍），請稍候…', '開門中，請稍候');
+               showLoading(I18N.opening_door_book);
                const res = await fetch('/api/hardware/open', { method: 'POST' });
                const result = await res.json();
                if (res.ok && result.success) {
@@ -1371,15 +1446,15 @@
                    const btnInner = document.querySelector('#step-place-book button');
                    if(btnInner) {
                        btnInner.onclick = finishBookAndStartAttachment;
-                       btnInner.innerHTML = '<i class="fas fa-arrow-right"></i> 完成書籍投入，下一步';
+                       btnInner.innerHTML = '<i class="fas fa-arrow-right"></i> ' + I18N.btn_book_inserted_next;
                    }
                } else {
                    hideLoading();
-                   alert(result.message || '開門失敗');
+                   alert(result.message || I18N.open_failed);
                }
            } catch (e) {
                hideLoading();
-               alert('系統錯誤');
+               alert(I18N.system_error);
            } finally {
                if (btn) setTimeout(() => { try { btn.disabled = false } catch(e){} }, 500);
            }
@@ -1422,7 +1497,7 @@
                         nextStep('step-welcome');
                     });
                     if (!handled) {
-                        alert(result.message || '書籍歸還失敗');
+                        alert(result.message || I18N.book_return_failed);
                         resetFlow();
                     }
                     return;
@@ -1451,7 +1526,7 @@
 
             } catch (e) {
                 hideLoading();
-                alert('系統錯誤');
+                alert(I18N.system_error);
             }
         }
 
@@ -1464,7 +1539,7 @@
              
              // 簡單核對：掃描的條碼必須與書籍條碼一致
              if (barcode.trim().toUpperCase() === currentProcessingBook.book_id.trim().toUpperCase()) {
-                 statusText.textContent = '條碼核對成功！準備開啟投書口...';
+                 statusText.textContent = I18N.attach_verify_ok;
                  statusText.style.color = '#2ecc71';
                  
                  // 記錄掃描的附件條碼供後端驗證
@@ -1473,14 +1548,14 @@
                  // 核對成功，開啟投書口
                  await startAttachmentInsertion();
              } else {
-                 statusText.textContent = '條碼不符！請掃描正確的附件條碼';
+                 statusText.textContent = I18N.attach_verify_fail;
                  statusText.style.color = '#dc3545';
                  // 清空輸入框
                  const input = document.getElementById('attachment-barcode-input');
                  if(input) input.value = '';
                  
                  setTimeout(() => {
-                     statusText.textContent = '請掃描附件上的條碼進行核對';
+                     statusText.textContent = I18N.attach_scan_status;
                      statusText.style.color = 'var(--text-light)';
                  }, 3000);
              }
@@ -1489,13 +1564,13 @@
         // 2.6 開啟投書口供附件投入
         async function startAttachmentInsertion() {
              // 先喚醒並回原點，確保能安全開門接收附件
-             showLoading('喚醒並回原點中，稍候再開啟投書口 (附件)…');
+             showLoading(I18N.wake_before_open_attach);
              try {
                  const wakeRes = await fetch('/api/hardware/wake_and_home', { method: 'POST' });
                  const wakeJson = await wakeRes.json().catch(()=>({}));
                  if (!wakeRes.ok || !wakeJson.success) {
                      hideLoading();
-                     alert(wakeJson.message || '喚醒或回原點失敗，請稍候再試');
+                     alert(wakeJson.message || I18N.wake_failed_retry);
                      nextStep('step-success');
                      return;
                  }
@@ -1510,20 +1585,20 @@
                             nextStep('step-insert-attachment');
                          } else {
                             hideLoading();
-                            alert(result.message || '開啟投書口失敗');
+                            alert(result.message || I18N.open_slot_failed);
                             // 即使失敗，也許應該允許重試或結束
-                            alert('無法開啟投書口接收附件，請洽櫃台');
+                            alert(I18N.attach_slot_failed);
                             nextStep('step-success');
                          }
                      } catch (e) {
                         hideLoading();
-                        alert('系統錯誤');
+                        alert(I18N.system_error);
                         nextStep('step-success');
                      }
                  }, 1000);
              } catch (e) {
                  hideLoading();
-                 alert('系統錯誤，請稍後再試');
+                 alert(I18N.system_error_retry);
                  nextStep('step-success');
              }
         }
@@ -1532,7 +1607,7 @@
         async function finalizeAttachmentReturn(btn) {
              if(!currentProcessingBook) return;
              if(!currentAttachmentBarcode) {
-                 alert('尚未掃描附件條碼，請先掃描以便核對');
+                 alert(I18N.attach_scan_first);
                  return;
              }
              if (btn) btn.disabled = true;
@@ -1590,13 +1665,13 @@
                         nextStep('step-welcome');
                     });
                     if (!handled) {
-                        alert(result.message || '附件處理異常，但書籍已歸還。');
+                        alert(result.message || I18N.attach_error_book_ok);
                         nextStep('step-success');
                     }
                 }
              } catch(e) {
                  hideLoading();
-                 alert('系統錯誤');
+                 alert(I18N.system_error);
                  nextStep('step-success');
              } finally {
                  if (btn) setTimeout(() => { try { btn.disabled = false } catch(e){} }, 500);
@@ -1621,18 +1696,18 @@
 
                 if (data.library_ok) {
                     libDot.style.backgroundColor = '#2ecc71';
-                    libText.textContent = '可用';
+                    libText.textContent = I18N.lib_ok;
                 } else {
                     libDot.style.backgroundColor = '#dc3545';
-                    libText.textContent = '連線失敗';
+                    libText.textContent = I18N.lib_fail;
                 }
 
                 if (data.machine_ok) {
                     machDot.style.backgroundColor = '#2ecc71';
-                    machText.textContent = '就緒';
+                    machText.textContent = I18N.mach_ready;
                 } else {
                     machDot.style.backgroundColor = '#dc3545';
-                    machText.textContent = '離線';
+                    machText.textContent = I18N.mach_off;
                 }
             } catch (e) {
                 console.error('Update status UI failed', e);
